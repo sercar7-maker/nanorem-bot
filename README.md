@@ -111,5 +111,11 @@ Private Project - NANOREM
 
 ## Contact
 
+## ⚠️ Важное примечание
+
+**Папка `integrations/` устарела и не используется.**
+
+Облачная касса уже подключена производителем NANOREM напрямую. Все файлы в папке `integrations/` (cash_register.py, cash_register_config.py) оставлены только для справки и не требуются для работы системы.
+
 Project Owner: sercar7-maker  
 Repository: https://github.com/sercar7-maker/nanorem-bot
