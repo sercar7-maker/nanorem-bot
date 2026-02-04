@@ -1,63 +1,56 @@
 """Main Telegram Bot class for NANOREM MLM System."""
 
 import logging
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from config import BOT_TOKEN
-from database.db import DatabaseManager
-from core.partner_manager import PartnerManager
-from core.commission import CommissionCalculator
-from integrations.cash_register import CashRegister
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
+
+from config import BOT_TOKEN, DEBUG
 
 logger = logging.getLogger(__name__)
 
 
 class TelegramBot:
     """Main bot class for handling Telegram interactions."""
-    
+
     def __init__(self):
-        """Initialize bot with database and business logic components."""
-        self.app = Application.builder().token(BOT_TOKEN).build()
-        self.db_manager = DatabaseManager()
-        self.partner_manager = PartnerManager(self.db_manager)
-        self.commission_calculator = CommissionCalculator()
-        self.cash_register = CashRegister()
+        """Initialize bot with Telegram token and handlers."""
+        self.application = None
+        self.token = BOT_TOKEN
         logger.info("TelegramBot initialized")
-    
-    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /start command."""
-        user = update.effective_user
-        await update.message.reply_text(
-            f"Добро пожаловать, {user.first_name}!\n\n"
-            "Это система управления MLM бизнесом NANOREM.\n"
-            "Используйте /help для списка доступных команд."
-        )
-        logger.info(f"User {user.id} started bot")
-    
-    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /help command."""
-        help_text = (
-            "Доступные команды:\n\n"
-            "/start - Начать работу\n"
-            "/help - Показать эту справку\n"
-            "/register - Регистрация партнёра\n"
-            "/profile - Мой профиль\n"
-            "/network - Моя структура\n"
-            "/sales - Продажи и комиссии\n"
-            "/receipt - Создать чек"
-        )
-        await update.message.reply_text(help_text)
-    
-    async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle errors in bot."""
-        logger.error(f"Update {update} caused error {context.error}")
-        if update and update.message:
-            await update.message.reply_text(
-                "Произошла ошибка. Пожалуйста, попробуйте позже."
-            )
-    
-    def run(self):
-        """Start the bot."""
-        logger.info("Starting bot...")
-        self.app.run_polling()
-        logger.info("Bot stopped")
+
+    def setup(self):
+        """Setup bot application and handlers."""
+        if not self.token:
+            raise ValueError("BOT_TOKEN is not set!")
+
+        # Create application using token
+        self.application = Application.builder().token(self.token).build()
+        logger.info("Bot application created")
+
+        # Import and setup handlers
+        from .handlers import setup_handlers
+        setup_handlers(self.application)
+        logger.info("Handlers registered")
+
+    async def start(self):
+        """Start the bot polling for updates."""
+        if not self.application:
+            self.setup()
+
+        await self.application.initialize()
+        await self.application.start()
+        await self.application.updater.start_polling()
+        logger.info("Bot started polling for updates")
+
+    async def stop(self):
+        """Stop the bot."""
+        if self.application:
+            await self.application.updater.stop()
+            await self.application.stop()
+            await self.application.shutdown()
+            logger.info("Bot stopped")
+
+    def get_application(self):
+        """Get the application instance (for webhook mode)."""
+        if not self.application:
+            self.setup()
+        return self.application
