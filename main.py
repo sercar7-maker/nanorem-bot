@@ -1,101 +1,93 @@
 #!/usr/bin/env python3
-"""NANOREM MLM System - Main Application Entry Point"""
+"""NANOREM MLM System - Main Application Entry Point."""
 
 import sys
+import asyncio
 import logging
-import argparse
 from pathlib import Path
-from typing import Optional
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent))
+
+from config import BOT_TOKEN, DEBUG, APP_NAME, APP_VERSION, DATABASE_URL
+from telegram.bot import TelegramBot
+from database.db import DatabaseManager
+
 logger = logging.getLogger(__name__)
 
-# Import configuration
-try:
-    from config import (
-        TELEGRAM_BOT_TOKEN,
-        DATABASE_URL,
-        APP_NAME,
-        APP_VERSION,
-        DEBUG_MODE,
-        LOG_LEVEL
-    )
-except ImportError as e:
-    logger.error(f"Failed to import configuration: {e}")
-    sys.exit(1)
 
-# Import application modules
-try:
-    from telegram import TelegramBot
-    from telegram.handlers import setup_handlers
-    from database.db import DatabaseManager
-except ImportError as e:
-    logger.error(f"Failed to import modules: {e}")
-    sys.exit(1)
+async def main():
+    """Main application entry point."""
+    logger.info(f"Starting {APP_NAME} v{APP_VERSION}")
+    
+    # Initialize database
+    db = DatabaseManager(DATABASE_URL)
+    if not db.check_connection():
+        logger.error("Failed to connect to database!")
+        return
+    
+    # Initialize bot
+    bot = TelegramBot()
+    bot.setup()
+    
+    try:
+        logger.info("Bot is running. Press Ctrl+C to stop.")
+        await bot.start()
+    except KeyboardInterrupt:
+        logger.info("Received keyboard interrupt, stopping bot...")
+        await bot.stop()
+    except Exception as e:
+        logger.error(f"Error running bot: {e}", exc_info=True)
+        await bot.stop()
+    finally:
+        db.close()
+        logger.info(f"{APP_NAME} stopped")
 
 
-def main():
-    """Main entry point for NANOREM MLM application."""
-    parser = argparse.ArgumentParser(
-        description=f"{APP_NAME} v{APP_VERSION}"
+if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description=f"{APP_NAME} - MLM Management System")
+    parser.add_argument(
+        "--init-db",
+        action="store_true",
+        help="Initialize database schema",
     )
     parser.add_argument(
-        '--mode',
-        choices=['telegram', 'web', 'all'],
-        default='telegram',
-        help='Run mode: telegram bot, web interface, or both'
-    )
-    parser.add_argument(
-        '--debug',
-        action='store_true',
-        help='Enable debug mode'
+        "--debug",
+        action="store_true",
+        help="Run in debug mode (overrides config)",
     )
     
     args = parser.parse_args()
     
-    # Initialize database
-    logger.info("Initializing database...")
-    db_manager = DatabaseManager()
+    # Setup logging
+    if args.debug or DEBUG:
+        log_level = logging.DEBUG
+    else:
+        log_level = logging.INFO
     
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+    
+    logger = logging.getLogger(__name__)
+    
+    # Initialize database if requested
+    if args.init_db:
+        logger.info("Initializing database...")
+        db = DatabaseManager(DATABASE_URL)
+        db.init_db()
+        logger.info("Database initialized successfully")
+        sys.exit(0)
+    
+    # Run main app
     try:
-        # Check database connection
-        if db_manager.check_connection():
-            logger.info("Соединение с базой данных установлено")
-        else:
-            logger.error("Не удалось подключиться к базе данных")
-            return 1
-        
-        # Run selected mode
-        if args.mode in ['telegram', 'all']:
-            logger.info("Запуск Telegram бота...")
-            bot = TelegramBot()
-            setup_handlers(bot.app, bot)
-            
-            logger.info(f"{APP_NAME} v{APP_VERSION} started")
-            logger.info("Бот готов к работе!")
-            
-            bot.run()
-        
-        if args.mode == 'web':
-            logger.info("Веб-интерфейс будет добавлен в следующей версии")
-            # TODO: Implement web interface
-            pass
-        
-        return 0
-        
+        asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("Приложение остановлено пользователем")
-        return 0
+        logger.info("Application interrupted by user")
+        sys.exit(0)
     except Exception as e:
-        logger.error(f"Критическая ошибка: {e}", exc_info=True)
-        return 1
-    finally:
-        logger.info("Завершение работы...")
-
-
-if __name__ == '__main__':
-    sys.exit(main())
+        logger.error(f"Fatal error: {e}", exc_info=True)
+        sys.exit(1)
