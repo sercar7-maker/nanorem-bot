@@ -1,86 +1,58 @@
 """Command handlers setup for NANOREM MLM Telegram Bot."""
 
 import logging
-from telegram.ext import CommandHandler, MessageHandler, filters, Application
 from telegram import Update
-from telegram.ext import ContextTypes
+from telegram.ext import Application, CommandHandler, ContextTypes
 
 logger = logging.getLogger(__name__)
 
 
-def setup_handlers(app: Application, bot_instance) -> None:
-    """Setup all command and message handlers.
-    
-    Args:
-        app: Telegram Application instance
-        bot_instance: TelegramBot instance with business logic
-    """
-    # Basic commands
-    app.add_handler(CommandHandler("start", bot_instance.start))
-    app.add_handler(CommandHandler("help", bot_instance.help_command))
-    
-    # Partner management commands
-    app.add_handler(CommandHandler("register", handle_register))
-    app.add_handler(CommandHandler("profile", handle_profile))
-    
-    # Network and sales commands
-    app.add_handler(CommandHandler("network", handle_network))
-    app.add_handler(CommandHandler("sales", handle_sales))
-    
-    # Cash register integration
-    app.add_handler(CommandHandler("receipt", handle_receipt))
-    
-    # Error handler
-    app.add_error_handler(bot_instance.error_handler)
-    
-    logger.info("All handlers registered successfully")
-
-
-async def handle_register(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle partner registration."""
-    await update.message.reply_text(
-        "Регистрация партнёра\n\n"
-        "Пожалуйста, отправьте ваши данные в формате:\n"
-        "ФИО, телефон, email, город"
+async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /start command."""
+    user = update.effective_user
+    message = (
+        f"Привет, {user.first_name}!\n\n"
+        f"Добро пожаловать в NANOREM MLM систему.\n\n"
+        f"Команды:\n"
+        f"/help - справка\n"
+        f"/profile - мой профиль\n"
+        f"/register - зарегистрироваться партнёром"
     )
+    await update.message.reply_text(message)
+    logger.info(f"User {user.id} started bot")
 
 
-async def handle_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show user profile."""
-    user_id = update.effective_user.id
-    await update.message.reply_text(
-        f"Ваш профиль\n\n"
-        f"ID: {user_id}\n"
-        f"Статус: Активный партнёр\n"
-        f"Уровень: 1\n"
-        f"Баланс: 0 руб."
+async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /help command."""
+    message = (
+        "Доступные команды:\n\n"
+        "/start - начало\n"
+        "/help - справка\n"
+        "/profile - мой профиль\n"
+        "/register - зарегистрироваться партнёром\n\n"
+        "Для помощи свяжитесь с поддержкой."
     )
+    await update.message.reply_text(message)
 
 
-async def handle_network(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show partner network structure."""
-    await update.message.reply_text(
-        "Ваша структура\n\n"
-        "Партнёров 1-го уровня: 0\n"
-        "Партнёров 2-го уровня: 0\n"
-        "Всего в структуре: 0"
+async def profile_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /profile command."""
+    user = update.effective_user
+    message = (
+        f"Ваш профиль:\n\n"
+        f"ID: {user.id}\n"
+        f"Имя: {user.first_name} {user.last_name or ''}\n"
+        f"Username: @{user.username or 'не указан'}\n"
+        f"\nДополнительная информация скоро..."
     )
+    await update.message.reply_text(message)
 
 
-async def handle_sales(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show sales and commissions."""
-    await update.message.reply_text(
-        "Продажи и комиссии\n\n"
-        "Личные продажи: 0 руб.\n"
-        "Продажи структуры: 0 руб.\n"
-        "Начислено комиссий: 0 руб."
-    )
-
-
-async def handle_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle receipt creation request."""
-    await update.message.reply_text(
-        "Создание чека\n\n"
-        "Отправьте сумму продажи и товары:\n"
-        "Пример: 5000 NANOREM Ceramic Coating"
-    )
+def setup_handlers(app: Application) -> None:
+    """Setup all command and message handlers."""
+    # Command handlers
+    app.add_handler(CommandHandler("start", start_handler))
+    app.add_handler(CommandHandler("help", help_handler))
+    app.add_handler(CommandHandler("profile", profile_handler))
+    
+    logger.info("Handlers registered successfully")
