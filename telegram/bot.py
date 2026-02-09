@@ -2,8 +2,8 @@
 
 import logging
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
-
 from config import BOT_TOKEN, DEBUG
+from .handlers import setup_handlers
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,6 @@ class TelegramBot:
         logger.info("Bot application created")
 
         # Import and setup handlers
-        from .handlers import setup_handlers
         setup_handlers(self.application)
         logger.info("Handlers registered")
 
@@ -47,7 +46,7 @@ class TelegramBot:
             await self.application.updater.stop()
             await self.application.stop()
             await self.application.shutdown()
-            logger.info("Bot stopped")
+        logger.info("Bot stopped")
 
     def get_application(self):
         """Get the application instance (for webhook mode)."""
