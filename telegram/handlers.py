@@ -1,3 +1,4 @@
+# Force update
 """Command handlers setup for NANOREM MLM Telegram Bot."""
 
 import logging
