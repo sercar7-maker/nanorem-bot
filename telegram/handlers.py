@@ -6,6 +6,8 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 from database.db import SessionLocal
 from database.models import Partner, Commission, Purchase
 from sqlalchemy import func
+from core.commission import CommissionCalculator
+from integrations.cash_register import CashRegisterIntegration
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,8 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "/register - зарегистрироваться в системе
 "
         "/profile - мой личный кабинет
+"
+        "/purchase [сумма] - внести закупку (тест)
 "
         "/info - условия начислений
 "
@@ -63,7 +67,7 @@ async def register_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             telegram_id=user.id,
             username=user.username,
             upline_id=upline_id,
-            is_active=True # Default active for demo
+            is_active=True
         )
         session.add(new_partner)
         session.commit()
@@ -79,7 +83,46 @@ async def register_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 `{ref_link}`",
             parse_mode='Markdown'
         )
-        logger.info(f"New partner registered: {user.id} (upline: {upline_id})")
+
+async def purchase_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle manual purchase for testing."""
+    user = update.effective_user
+    if not context.args or not context.args[0].replace('.', '', 1).isdigit():
+        await update.message.reply_text("Использование: /purchase [сумма]
+Пример: /purchase 5000")
+        return
+        
+    amount = float(context.args[0])
+    
+    with SessionLocal() as session:
+        partner = session.query(Partner).filter(Partner.telegram_id == user.id).first()
+        if not partner:
+            await update.message.reply_text("Сначала зарегистрируйтесь с помощью /register")
+            return
+            
+        # Process purchase through integration logic
+        integration = CashRegisterIntegration(session)
+        purchase_data = {
+            'partner_id': partner.id,
+            'amount': amount,
+            'order_id': f"TEST-{user.id}-{int(func.now().selectable.compile().statement.execute().fetchone()[0]) if False else 12345}" 
+        }
+        
+        # Simplified test order_id for demo
+        import time
+        purchase_data['order_id'] = f"TEST-{user.id}-{int(time.time())}"
+        
+        success = integration.process_purchase(purchase_data)
+        
+        if success:
+            await update.message.reply_text(
+                f"✅ Закупка на сумму {amount} руб. успешно внесена!
+"
+                "Комиссии распределены по сети."
+            )
+            # TODO: Send notifications to uplines
+        else:
+            await update.message.reply_text("❌ Ошибка при внесении закупки.")
 
 async def profile_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show partner's profile and statistics."""
@@ -91,7 +134,6 @@ async def profile_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await update.message.reply_text("Вы не зарегистрированы. Используйте /register")
             return
             
-        # Aggregate statistics
         total_earned = session.query(func.sum(Commission.amount)).filter(Commission.partner_id == partner.id).scalar() or 0.0
         personal_volume = session.query(func.sum(Purchase.amount)).filter(Purchase.partner_id == partner.id).scalar() or 0.0
         direct_referrals = session.query(Partner).filter(Partner.upline_id == user.id).count()
@@ -99,28 +141,24 @@ async def profile_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         bot_username = (await context.bot.get_me()).username
         ref_link = f"https://t.me/{bot_username}?start={user.id}"
         
-        status_emoji = "✅" if partner.is_active else "❌"
-        
         msg = (
             f"👤 *Ваш профиль*
 
 "
-            f"🆔 Telegram ID: `{user.id}`
+            f"🆔 ID: `{user.id}`
 "
-            f"📊 Статус: {status_emoji} {'Активен' if partner.is_active else 'Неактивен'}
+            f"📊 Статус: {'✅ Активен' if partner.is_active else '❌ Неактивен'}
 
 "
             f"💰 Заработано комиссий: *{total_earned:.2f}* руб.
 "
             f"🛒 Личный оборот: *{personal_volume:.2f}* руб.
 "
-            f"👥 Партнеров в 1 линии: *{direct_referrals}*
+            f"👥 Команда (1 линия): *{direct_referrals}* чел.
 
 "
-            f"🔗 Реферальная ссылка:
-`{ref_link}`"
+            f"🔗 Ссылка: `{ref_link}`"
         )
-        
         await update.message.reply_text(msg, parse_mode='Markdown')
 
 async def info_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -129,34 +167,24 @@ async def info_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "📊 *Маркетинг-план NANOREM*
 
 "
-        "Система начислений с 5 уровней:
+        "1 линия: *20%*
+"
+        "2 линия: *10%*
+"
+        "3-5 линии: *5%*
 
 "
-        "1 уровень: *20%*
+        "💰 Начисления идут от суммы закупки материалов.
 "
-        "2 уровень: *10%*
-"
-        "3 уровень: *5%*
-"
-        "4 уровень: *5%*
-"
-        "5 уровень: *5%*
-
-"
-        "💰 *База начисления:* сумма закупки материалов.
-
-"
-        "⚡️ *Компрессия:* если ваш прямой аплайн не активен, "
-        "его комиссия передается выше по ветке, чтобы цепочка не прерывалась."
+        "⚡️ Работает система компрессии вверх."
     )
     await update.message.reply_text(msg, parse_mode='Markdown')
 
 def setup_handlers(app: Application) -> None:
-    """Register all command handlers with the application."""
+    """Register all command handlers."""
     app.add_handler(CommandHandler("start", start_handler))
     app.add_handler(CommandHandler("register", register_handler))
+    app.add_handler(CommandHandler("purchase", purchase_handler))
     app.add_handler(CommandHandler("profile", profile_handler))
     app.add_handler(CommandHandler("info", info_handler))
     app.add_handler(CommandHandler("help", start_handler))
-    
-    logger.info("Telegram handlers updated and registered.")
