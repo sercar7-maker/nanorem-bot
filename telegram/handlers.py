@@ -36,6 +36,8 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 "
         "/profile - мой личный кабинет
 "
+        "/network - моя команда
+"
         "/purchase [сумма] - внести закупку (тест)
 "
         "/info - условия начислений
@@ -100,29 +102,79 @@ async def purchase_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await update.message.reply_text("Сначала зарегистрируйтесь с помощью /register")
             return
             
-        # Process purchase through integration logic
         integration = CashRegisterIntegration(session)
+        import time
         purchase_data = {
             'partner_id': partner.id,
             'amount': amount,
-            'order_id': f"TEST-{user.id}-{int(func.now().selectable.compile().statement.execute().fetchone()[0]) if False else 12345}" 
+            'order_id': f"TEST-{user.id}-{int(time.time())}"
         }
-        
-        # Simplified test order_id for demo
-        import time
-        purchase_data['order_id'] = f"TEST-{user.id}-{int(time.time())}"
         
         success = integration.process_purchase(purchase_data)
         
         if success:
-            await update.message.reply_text(
-                f"✅ Закупка на сумму {amount} руб. успешно внесена!
-"
-                "Комиссии распределены по сети."
-            )
-            # TODO: Send notifications to uplines
+            await update.message.reply_text(f"✅ Закупка на {amount} руб. внесена!")
         else:
             await update.message.reply_text("❌ Ошибка при внесении закупки.")
+
+async def network_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show user's referral network structure."""
+    user = update.effective_user
+    
+    with SessionLocal() as session:
+        partner = session.query(Partner).filter(Partner.telegram_id == user.id).first()
+        if not partner:
+            await update.message.reply_text("Вы не зарегистрированы.")
+            return
+
+        # Recursive network fetch (limited to 5 levels)
+        def get_line_stats(upline_id, level, max_level=5):
+            if level > max_level: return []
+            
+            partners = session.query(Partner).filter(Partner.upline_id == upline_id).all()
+            stats = [(level, len(partners))]
+            
+            for p in partners:
+                # This is simplified; in a large network we would use aggregate queries
+                pass
+            
+            # To show real numbers per level, we need a recursive approach or BFS
+            return stats
+
+        # BFS to get counts per level
+        level_counts = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+        current_level_ids = [user.id]
+        
+        for level in range(1, 6):
+            next_level_partners = session.query(Partner).filter(Partner.upline_id.in_(current_level_ids)).all()
+            if not next_level_partners:
+                break
+            level_counts[level] = len(next_level_partners)
+            current_level_ids = [p.telegram_id for p in next_level_partners]
+
+        total_team = sum(level_counts.values())
+        
+        msg = (
+            f"👥 *Ваша команда*
+
+"
+            f"Всего партнёров: *{total_team}*
+
+"
+            f"1 линия: *{level_counts[1]}* чел.
+"
+            f"2 линия: *{level_counts[2]}* чел.
+"
+            f"3 линия: *{level_counts[3]}* чел.
+"
+            f"4 линия: *{level_counts[4]}* чел.
+"
+            f"5 линия: *{level_counts[5]}* чел.
+
+"
+            "_Показываются только активные ветки до 5 уровня._"
+        )
+        await update.message.reply_text(msg, parse_mode='Markdown')
 
 async def profile_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show partner's profile and statistics."""
@@ -136,7 +188,6 @@ async def profile_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             
         total_earned = session.query(func.sum(Commission.amount)).filter(Commission.partner_id == partner.id).scalar() or 0.0
         personal_volume = session.query(func.sum(Purchase.amount)).filter(Purchase.partner_id == partner.id).scalar() or 0.0
-        direct_referrals = session.query(Partner).filter(Partner.upline_id == user.id).count()
         
         bot_username = (await context.bot.get_me()).username
         ref_link = f"https://t.me/{bot_username}?start={user.id}"
@@ -153,8 +204,6 @@ async def profile_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             f"💰 Заработано комиссий: *{total_earned:.2f}* руб.
 "
             f"🛒 Личный оборот: *{personal_volume:.2f}* руб.
-"
-            f"👥 Команда (1 линия): *{direct_referrals}* чел.
 
 "
             f"🔗 Ссылка: `{ref_link}`"
@@ -174,9 +223,9 @@ async def info_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "3-5 линии: *5%*
 
 "
-        "💰 Начисления идут от суммы закупки материалов.
+        "💰 Начисления от суммы закупки материалов.
 "
-        "⚡️ Работает система компрессии вверх."
+        "⚡️ Система компрессии вверх."
     )
     await update.message.reply_text(msg, parse_mode='Markdown')
 
@@ -185,6 +234,7 @@ def setup_handlers(app: Application) -> None:
     app.add_handler(CommandHandler("start", start_handler))
     app.add_handler(CommandHandler("register", register_handler))
     app.add_handler(CommandHandler("purchase", purchase_handler))
+    app.add_handler(CommandHandler("network", network_handler))
     app.add_handler(CommandHandler("profile", profile_handler))
     app.add_handler(CommandHandler("info", info_handler))
     app.add_handler(CommandHandler("help", start_handler))
