@@ -1,175 +1,133 @@
 """Cloud Cash Register Integration Module.
-
 Handles receipt processing and synchronization with the MLM system.
-Processes material procurement (purchase) to distribute commissions.
 """
 import logging
-import asyncio
-from typing import Optional, List, Dict, Any
-from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
-
-from database.db import db
-from database.models import Purchase, Partner, Commission, OrderStatus, CommissionStatus, PartnerStatus
+from typing import Dict, Any, List
+from sqlalchemy.orm import Session
+from database.db import SessionLocal
+from database.models import Purchase, Partner, Commission, OrderStatus, CommissionStatus
 from core.commission import CommissionCalculator
+from telegram.notifications import notify_commission
 
 logger = logging.getLogger(__name__)
 
-
-class ReceiptStatus(Enum):
-    """Receipt status enumeration."""
-    PENDING = "pending"
-    COMPLETED = "completed"
-    CANCELLED = "cancelled"
-    ERROR = "error"
-
-
-@dataclass
-class Receipt:
-    """Receipt data model from cash register."""
-    receipt_id: str
-    partner_id: int
-    amount: float
-    items: List[Dict[str, Any]]
-    status: ReceiptStatus = ReceiptStatus.PENDING
-    timestamp: datetime = None
-    external_receipt_id: Optional[str] = None
-    payment_method: str = "cash"
-    notes: Optional[str] = None
-
-    def __post_init__(self):
-        if self.timestamp is None:
-            self.timestamp = datetime.utcnow()
-
-
 class CashRegisterIntegration:
-    """
-    Orchestrator for Cash Register events and MLM payouts.
-    """
+    """Orchestrator for Cash Register events and MLM payouts."""
 
-    def __init__(self):
+    def __init__(self, session: Session = None):
+        self.session = session
         self.calculator = CommissionCalculator()
-        self.logger = logger
 
-    async def process_purchase(self, partner_id: int, amount: float, ext_ref: str = None) -> bool:
+    async def process_purchase(self, data: Dict[str, Any]) -> bool:
         """
-        Main entry point: Register a purchase and trigger MLM commissions.
+        Register a purchase and trigger MLM commissions.
+        Expects keys: partner_id (or telegram_id), amount, order_id
+        """
+        # Allow either passed session or new session
+        session = self.session if self.session else SessionLocal()
         
-        Args:
-            partner_id: ID of the partner who bought materials.
-            amount:     Total procurement amount.
-            ext_ref:    External reference (e.g., store order ID).
-            
-        Returns:
-            True if processed and commissions saved, False otherwise.
-        """
-        session = db.get_session()
         try:
-            # 1. Verify partner exists
-            partner = session.query(Partner).get(partner_id)
+            partner_id = data.get('partner_id')
+            telegram_id = data.get('telegram_id')
+            amount = float(data.get('amount', 0))
+            order_id = data.get('order_id')
+
+            # 1. Resolve partner
+            if partner_id:
+                partner = session.query(Partner).get(partner_id)
+            else:
+                partner = session.query(Partner).filter(Partner.telegram_id == telegram_id).first()
+
             if not partner:
-                self.logger.error(f"Partner {partner_id} not found for purchase.")
+                logger.error(f"Partner not found for purchase data: {data}")
                 return False
 
-            # 2. Create and save Purchase record
-            purchase_no = f"PUR-{int(datetime.utcnow().timestamp())}-{partner_id}"
-            new_purchase = Purchase(
-                purchase_number=purchase_no,
-                partner_id=partner_id,
+            # 2. Save Purchase
+            purchase = Purchase(
+                purchase_number=order_id or f"PUR-{int(datetime.utcnow().timestamp())}",
+                partner_id=partner.id,
                 amount=amount,
                 status=OrderStatus.PAID,
                 paid_at=datetime.utcnow(),
-                ext_ref=ext_ref
+                ext_ref=order_id
             )
-            session.add(new_purchase)
-            session.flush() # Ensure ID is generated for commission linking
+            session.add(purchase)
+            session.flush()
 
-            # 3. Build upline chain for commission calculation
-            upline_chain = self._get_upline_chain(session, partner_id)
+            # 3. Build upline chain
+            upline_chain = self._get_upline_chain(session, partner.id)
 
-            # 4. Calculate commissions (using core logic: 20/10/5/5/5 with compression)
-            calculated_comms = self.calculator.calculate_purchase_commissions(
+            # 4. Calculate Commissions (core logic)
+            calculated = self.calculator.calculate_purchase_commissions(
                 purchase_amount=amount,
-                buying_partner_id=partner_id,
+                buying_partner_id=partner.id,
                 upline_chain=upline_chain
             )
 
-            # 5. Save results and update totals
-            partner.total_procurement += amount
+            # 5. Save and Notify
+            notifications = []
+            buyer_name = partner.username or f"ID:{partner.telegram_id}"
             
-            for comm in calculated_comms:
+            for c in calculated:
                 db_comm = Commission(
-                    partner_id=comm.partner_id,
-                    purchase_id=new_purchase.id,
-                    source_partner_id=partner_id,
-                    level=comm.level,
-                    rate=float(comm.rate),
-                    base_amount=float(comm.base_amount),
-                    amount=float(comm.amount),
+                    partner_id=c.partner_id,
+                    purchase_id=purchase.id,
+                    source_partner_id=partner.id,
+                    level=c.level,
+                    rate=c.rate,
+                    base_amount=c.base_amount,
+                    amount=c.amount,
                     status=CommissionStatus.PENDING,
-                    is_compressed=comm.compressed,
-                    notes=comm.notes
+                    is_compressed=c.compressed,
+                    notes=c.notes
                 )
                 session.add(db_comm)
                 
-                # Increment beneficiary's total accumulated commissions
-                beneficiary = session.query(Partner).get(comm.partner_id)
-                if beneficiary:
-                    beneficiary.total_commissions += float(comm.amount)
+                # Fetch telegram_id for notification
+                beneficiary = session.query(Partner).get(c.partner_id)
+                if beneficiary and beneficiary.telegram_id:
+                    notifications.append(
+                        notify_commission(
+                            beneficiary.telegram_id, 
+                            c.amount, 
+                            c.level, 
+                            buyer_name
+                        )
+                    )
 
-            session.commit()
-            self.logger.info(
-                f"Successfully processed purchase {purchase_no} for partner {partner_id}. "
-                f"Distributed {len(calculated_comms)} commissions."
-            )
+            if not self.session: # Commit only if we created the session
+                session.commit()
+                
+            # Trigger notifications asynchronously
+            import asyncio
+            if notifications:
+                asyncio.create_task(asyncio.gather(*notifications))
+
+            logger.info(f"Processed purchase for {buyer_name}: {amount} rub. Commissions: {len(calculated)}")
             return True
 
         except Exception as e:
-            session.rollback()
-            self.logger.error(f"Failed to process purchase for partner {partner_id}: {e}")
+            if not self.session: session.rollback()
+            logger.error(f"Failed to process purchase: {e}")
             return False
         finally:
-            db.remove_session()
+            if not self.session: session.close()
 
-    def _get_upline_chain(self, session, start_partner_id: int) -> List[tuple]:
-        """
-        Walk up the partner hierarchy to build a chain for the CommissionCalculator.
-        
-        Returns:
-            List of (partner_id, is_active) starting from direct upline.
-        """
+    def _get_upline_chain(self, session: Session, start_id: int) -> List[tuple]:
+        """Build (partner_id, is_active) chain for calculator."""
         chain = []
-        curr_id = start_partner_id
+        curr = session.query(Partner).get(start_id)
         
-        # Limit depth for safety (payouts are max 5 levels anyway)
+        # Max 5 levels of payouts usually, but let's walk enough for compression
         for _ in range(10):
-            partner = session.query(Partner).get(curr_id)
-            if not partner or not partner.upline_id:
-                break
+            if not curr or not curr.upline_id: break
             
-            upline = session.query(Partner).get(partner.upline_id)
-            if not upline:
-                break
-                
-            # Activity check: must have ACTIVE status
-            is_active = (upline.status == PartnerStatus.ACTIVE)
-            chain.append((upline.id, is_active))
-            curr_id = upline.id
+            # Find upline partner by telegram_id (upline_id is telegram_id in current models)
+            upline = session.query(Partner).filter(Partner.telegram_id == curr.upline_id).first()
+            if not upline: break
+            
+            chain.append((upline.id, upline.is_active))
+            curr = upline
             
         return chain
-
-    async def handle_webhook(self, data: Dict[str, Any]) -> bool:
-        """
-        Process incoming payment/receipt webhook from external cloud register.
-        """
-        # Standardize external payload
-        p_id = data.get('partner_id')
-        amt = data.get('total')
-        ref = data.get('order_id')
-        
-        if p_id and amt:
-            return await self.process_purchase(p_id, amt, ref)
-        
-        self.logger.warning(f"Invalid webhook data received: {data}")
-        return False
