@@ -8,6 +8,7 @@ from database.models import Partner, Commission, Purchase
 from sqlalchemy import func
 from core.commission import CommissionCalculator
 from integrations.cash_register import CashRegisterIntegration
+from .notifications import notify_new_referral
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,6 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     user = update.effective_user
     args = context.args
     
-    # Check for referral ID in command arguments
     ref_id = None
     if args and args[0].isdigit():
         ref_id = int(args[0])
@@ -58,13 +58,11 @@ async def register_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     upline_id = context.user_data.get('upline_id')
     
     with SessionLocal() as session:
-        # Check if already registered
         partner = session.query(Partner).filter(Partner.telegram_id == user.id).first()
         if partner:
-            await update.message.reply_text("Вы уже зарегистрированы в системе!")
+            await update.message.reply_text("Вы уже зарегистрированы!")
             return
             
-        # Create new partner
         new_partner = Partner(
             telegram_id=user.id,
             username=user.username,
@@ -74,6 +72,9 @@ async def register_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         session.add(new_partner)
         session.commit()
         
+        if upline_id:
+            await notify_new_referral(upline_id, user.first_name or user.username)
+        
         bot_username = (await context.bot.get_me()).username
         ref_link = f"https://t.me/{bot_username}?start={user.id}"
         
@@ -81,7 +82,7 @@ async def register_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             "🎉 Регистрация успешно завершена!
 
 "
-            f"Ваша реферальная ссылка для приглашений:
+            f"Ваша реферальная ссылка:
 `{ref_link}`",
             parse_mode='Markdown'
         )
@@ -90,8 +91,7 @@ async def purchase_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     """Handle manual purchase for testing."""
     user = update.effective_user
     if not context.args or not context.args[0].replace('.', '', 1).isdigit():
-        await update.message.reply_text("Использование: /purchase [сумма]
-Пример: /purchase 5000")
+        await update.message.reply_text("Использование: /purchase [сумма]")
         return
         
     amount = float(context.args[0])
@@ -99,7 +99,7 @@ async def purchase_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     with SessionLocal() as session:
         partner = session.query(Partner).filter(Partner.telegram_id == user.id).first()
         if not partner:
-            await update.message.reply_text("Сначала зарегистрируйтесь с помощью /register")
+            await update.message.reply_text("Сначала зарегистрируйтесь: /register")
             return
             
         integration = CashRegisterIntegration(session)
@@ -110,7 +110,8 @@ async def purchase_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             'order_id': f"TEST-{user.id}-{int(time.time())}"
         }
         
-        success = integration.process_purchase(purchase_data)
+        # Correctly await the async process_purchase
+        success = await integration.process_purchase(purchase_data)
         
         if success:
             await update.message.reply_text(f"✅ Закупка на {amount} руб. внесена!")
@@ -122,30 +123,11 @@ async def network_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     user = update.effective_user
     
     with SessionLocal() as session:
-        partner = session.query(Partner).filter(Partner.telegram_id == user.id).first()
-        if not partner:
-            await update.message.reply_text("Вы не зарегистрированы.")
-            return
-
-        # Recursive network fetch (limited to 5 levels)
-        def get_line_stats(upline_id, level, max_level=5):
-            if level > max_level: return []
-            
-            partners = session.query(Partner).filter(Partner.upline_id == upline_id).all()
-            stats = [(level, len(partners))]
-            
-            for p in partners:
-                # This is simplified; in a large network we would use aggregate queries
-                pass
-            
-            # To show real numbers per level, we need a recursive approach or BFS
-            return stats
-
-        # BFS to get counts per level
         level_counts = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
         current_level_ids = [user.id]
         
         for level in range(1, 6):
+            # Upline_id in Partner model refers to telegram_id of the inviter
             next_level_partners = session.query(Partner).filter(Partner.upline_id.in_(current_level_ids)).all()
             if not next_level_partners:
                 break
@@ -161,18 +143,15 @@ async def network_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             f"Всего партнёров: *{total_team}*
 
 "
-            f"1 линия: *{level_counts[1]}* чел.
+            f"1 линия: *{level_counts[1]}*
 "
-            f"2 линия: *{level_counts[2]}* чел.
+            f"2 линия: *{level_counts[2]}*
 "
-            f"3 линия: *{level_counts[3]}* чел.
+            f"3 линия: *{level_counts[3]}*
 "
-            f"4 линия: *{level_counts[4]}* чел.
+            f"4 линия: *{level_counts[4]}*
 "
-            f"5 линия: *{level_counts[5]}* чел.
-
-"
-            "_Показываются только активные ветки до 5 уровня._"
+            f"5 линия: *{level_counts[5]}*"
         )
         await update.message.reply_text(msg, parse_mode='Markdown')
 
@@ -183,7 +162,7 @@ async def profile_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     with SessionLocal() as session:
         partner = session.query(Partner).filter(Partner.telegram_id == user.id).first()
         if not partner:
-            await update.message.reply_text("Вы не зарегистрированы. Используйте /register")
+            await update.message.reply_text("Вы не зарегистрированы.")
             return
             
         total_earned = session.query(func.sum(Commission.amount)).filter(Commission.partner_id == partner.id).scalar() or 0.0
@@ -201,7 +180,7 @@ async def profile_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             f"📊 Статус: {'✅ Активен' if partner.is_active else '❌ Неактивен'}
 
 "
-            f"💰 Заработано комиссий: *{total_earned:.2f}* руб.
+            f"💰 Заработано: *{total_earned:.2f}* руб.
 "
             f"🛒 Личный оборот: *{personal_volume:.2f}* руб.
 
