@@ -1,9 +1,11 @@
 """Commission Calculator Module for NANOREM MLM System
 
-Handles all commission calculations for the multi-level marketing structure.
-Supports multiple levels, bonuses, and various commission types.
+Handles all commission calculations for the 5-level marketing structure.
+Commission base: total purchase (procurement) amount.
+Rates: Level 1 - 20%, Level 2 - 10%, Levels 3-4-5 - 5% each.
+Compression: if a partner in the chain is inactive, their level is skipped
+and the commission is passed one level up to the next active partner.
 """
-
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -12,158 +14,211 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Commission rates for 5-level NANOREM MLM structure
+# Base: total procurement (purchase) amount
+# ---------------------------------------------------------------------------
+DEFAULT_COMMISSION_RATES: Dict[int, Decimal] = {
+    1: Decimal('20.0'),  # Direct upline
+    2: Decimal('10.0'),  # 2nd level
+    3: Decimal('5.0'),   # 3rd level
+    4: Decimal('5.0'),   # 4th level
+    5: Decimal('5.0'),   # 5th level
+}
+
+MAX_LEVELS = 5
+
 
 @dataclass
 class CommissionRecord:
     """Record of a single commission transaction"""
     commission_id: int
     partner_id: int
-    source_partner_id: int  # Partner who made the sale
-    level: int
-    amount: Decimal
-    base_amount: Decimal  # Original sale amount
-    rate: Decimal  # Commission rate applied
+    source_partner_id: int  # Partner who made the purchase
+    level: int              # Actual structural level (1-5)
+    amount: Decimal         # Commission amount
+    base_amount: Decimal    # Total procurement amount (base for calculation)
+    rate: Decimal           # Commission rate applied (%)
     timestamp: datetime = field(default_factory=datetime.now)
     status: str = 'pending'  # pending, approved, paid
+    compressed: bool = False  # True if this record was created via compression
     notes: Optional[str] = None
 
 
 class CommissionCalculator:
     """
-    Commission Calculator for MLM Network
-    
-    Calculates commissions based on sales in the partner network.
-    Supports multiple levels with configurable rates.
+    Commission Calculator for NANOREM 5-level MLM Network.
+
+    Rules:
+    - Base for calculation: total procurement (purchase) amount.
+    - Rates by structural level: 20% / 10% / 5% / 5% / 5%.
+    - Number of branches is unlimited.
+    - Compression: if a partner in the upline chain is inactive,
+      their commission is NOT burned. Instead it is passed to the
+      next active partner one level up (upward compression by 1 step).
+    - Maximum depth: 5 levels.
     """
-    
-    def __init__(self, commission_rates: Dict[str, float]):
+
+    def __init__(
+        self,
+        commission_rates: Optional[Dict[int, Decimal]] = None
+    ):
         """
         Initialize commission calculator.
-        
+
         Args:
-            commission_rates: Dictionary mapping level to commission rate
-                Example: {'level_1': 15.0, 'level_2': 8.0, 'level_3': 5.0}
+            commission_rates: Dict mapping structural level (int) to rate (Decimal %).
+                              Defaults to NANOREM standard rates.
         """
-        self.commission_rates = commission_rates
+        self.commission_rates: Dict[int, Decimal] = (
+            commission_rates if commission_rates is not None
+            else DEFAULT_COMMISSION_RATES
+        )
         self.commissions: List[CommissionRecord] = []
         self._next_commission_id = 1
         self.logger = logger
-    
-    def calculate_sale_commissions(
+
+    # -----------------------------------------------------------------------
+    # Core method
+    # -----------------------------------------------------------------------
+
+    def calculate_purchase_commissions(
         self,
-        sale_amount: float,
-        selling_partner_id: int,
-        upline_chain: List[int]
+        purchase_amount: float,
+        buying_partner_id: int,
+        upline_chain: List[Tuple[int, bool]]
     ) -> List[CommissionRecord]:
         """
-        Calculate commissions for a sale across the upline.
-        
+        Calculate commissions for a procurement (purchase) across the upline.
+
         Args:
-            sale_amount: Total sale amount
-            selling_partner_id: ID of partner who made the sale
-            upline_chain: List of upline partner IDs [direct_upline, level_2, level_3, ...]
-        
+            purchase_amount:   Total procurement amount (base for all calculations).
+            buying_partner_id: ID of the partner who made the purchase.
+            upline_chain:      Ordered list of (partner_id, is_active) tuples,
+                               starting from direct upline (level 1) going up.
+                               Length can exceed MAX_LEVELS; only first MAX_LEVELS
+                               structural slots are filled.
+
         Returns:
-            List of CommissionRecord objects for each level
+            List of CommissionRecord for each paid-out commission.
+
+        Compression logic:
+            - We iterate through upline_chain filling structural slots 1..5.
+            - If a partner at the current slot is inactive, we skip them
+              (their slot is consumed but no commission is issued to them).
+              The commission for that slot is transferred to the next active
+              partner encountered, who receives it at the SAME structural
+              level (upward compression by one link).
+            - If no active partner is found for a slot before reaching the
+              end of the chain or MAX_LEVELS, that commission is not issued.
         """
-        calculated_commissions = []
-        base_amount = Decimal(str(sale_amount))
-        
+        calculated: List[CommissionRecord] = []
+        base = Decimal(str(purchase_amount))
+
         self.logger.info(
-            f"Calculating commissions for sale: {sale_amount} by partner {selling_partner_id}"
+            f"Purchase commissions: amount={purchase_amount}, "
+            f"buyer={buying_partner_id}"
         )
-        
-        for level_index, upline_partner_id in enumerate(upline_chain, start=1):
-            level_key = f"level_{level_index}"
-            
-            if level_key not in self.commission_rates:
-                self.logger.warning(f"No commission rate for {level_key}")
-                continue
-            
-            rate = Decimal(str(self.commission_rates[level_key])) / Decimal('100')
-            commission_amount = base_amount * rate
-            
-            commission = CommissionRecord(
-                commission_id=self._next_commission_id,
-                partner_id=upline_partner_id,
-                source_partner_id=selling_partner_id,
-                level=level_index,
-                amount=commission_amount,
-                base_amount=base_amount,
-                rate=rate * Decimal('100'),
-                status='pending'
-            )
-            
-            calculated_commissions.append(commission)
-            self.commissions.append(commission)
-            self._next_commission_id += 1
-            
-            self.logger.info(
-                f"Level {level_index}: Partner {upline_partner_id} earns "
-                f"{commission_amount:.2f} ({rate*100:.1f}%)"
-            )
-        
-        return calculated_commissions
-    
-    def calculate_team_bonus(
+
+        structural_level = 1  # Current MLM level slot being filled (1-5)
+        chain_index = 0       # Current position in upline_chain
+
+        while structural_level <= MAX_LEVELS and chain_index < len(upline_chain):
+            partner_id, is_active = upline_chain[chain_index]
+            chain_index += 1
+
+            if not is_active:
+                # Partner is inactive: compress upward.
+                # The structural slot is kept; we look for the next active
+                # partner in the chain to receive this level's commission.
+                self.logger.info(
+                    f"Level {structural_level}: partner {partner_id} is inactive "
+                    f"— compressing upward."
+                )
+                # Find next active partner without advancing structural level
+                found = False
+                while chain_index < len(upline_chain):
+                    next_id, next_active = upline_chain[chain_index]
+                    chain_index += 1
+                    if next_active:
+                        record = self._make_record(
+                            base=base,
+                            partner_id=next_id,
+                            source_id=buying_partner_id,
+                            level=structural_level,
+                            compressed=True
+                        )
+                        if record:
+                            calculated.append(record)
+                            self.commissions.append(record)
+                        found = True
+                        break
+                if not found:
+                    self.logger.warning(
+                        f"Level {structural_level}: no active upline found "
+                        f"after compression — commission not issued."
+                    )
+            else:
+                # Active partner — standard commission
+                record = self._make_record(
+                    base=base,
+                    partner_id=partner_id,
+                    source_id=buying_partner_id,
+                    level=structural_level,
+                    compressed=False
+                )
+                if record:
+                    calculated.append(record)
+                    self.commissions.append(record)
+
+            structural_level += 1
+
+        return calculated
+
+    # -----------------------------------------------------------------------
+    # Internal helpers
+    # -----------------------------------------------------------------------
+
+    def _make_record(
         self,
+        base: Decimal,
         partner_id: int,
-        team_sales: float,
-        bonus_rate: float
-    ) -> Decimal:
-        """
-        Calculate team bonus based on total team sales.
-        
-        Args:
-            partner_id: Partner ID
-            team_sales: Total sales from team
-            bonus_rate: Bonus rate percentage
-        
-        Returns:
-            Bonus amount
-        """
-        bonus_amount = Decimal(str(team_sales)) * Decimal(str(bonus_rate)) / Decimal('100')
-        
+        source_id: int,
+        level: int,
+        compressed: bool
+    ) -> Optional[CommissionRecord]:
+        """Create a CommissionRecord for a given structural level."""
+        if level not in self.commission_rates:
+            self.logger.warning(f"No commission rate for level {level}")
+            return None
+
+        rate = self.commission_rates[level]
+        amount = base * rate / Decimal('100')
+
+        record = CommissionRecord(
+            commission_id=self._next_commission_id,
+            partner_id=partner_id,
+            source_partner_id=source_id,
+            level=level,
+            amount=amount,
+            base_amount=base,
+            rate=rate,
+            compressed=compressed,
+            notes="compressed upward" if compressed else None
+        )
+        self._next_commission_id += 1
+
         self.logger.info(
-            f"Team bonus for partner {partner_id}: {bonus_amount:.2f} "
-            f"(team sales: {team_sales:.2f}, rate: {bonus_rate}%)"
+            f"Level {level}: partner {partner_id} earns "
+            f"{amount:.2f} ({rate}%)"
+            + (" [compressed]" if compressed else "")
         )
-        
-        return bonus_amount
-    
-    def calculate_performance_bonus(
-        self,
-        partner_id: int,
-        monthly_sales: float,
-        target: float,
-        bonus_amount: float
-    ) -> Decimal:
-        """
-        Calculate performance bonus if target is met.
-        
-        Args:
-            partner_id: Partner ID
-            monthly_sales: Partner's monthly sales
-            target: Monthly sales target
-            bonus_amount: Fixed bonus amount if target met
-        
-        Returns:
-            Bonus amount (0 if target not met)
-        """
-        if monthly_sales >= target:
-            bonus = Decimal(str(bonus_amount))
-            self.logger.info(
-                f"Performance bonus for partner {partner_id}: {bonus:.2f} "
-                f"(sales: {monthly_sales:.2f} >= target: {target:.2f})"
-            )
-            return bonus
-        else:
-            self.logger.info(
-                f"No performance bonus for partner {partner_id} "
-                f"(sales: {monthly_sales:.2f} < target: {target:.2f})"
-            )
-            return Decimal('0')
-    
+        return record
+
+    # -----------------------------------------------------------------------
+    # Query helpers
+    # -----------------------------------------------------------------------
+
     def get_total_commissions(
         self,
         partner_id: int,
@@ -172,86 +227,46 @@ class CommissionCalculator:
         status: Optional[str] = None
     ) -> Decimal:
         """
-        Get total commissions for a partner.
-        
+        Get total commissions earned by a partner.
+
         Args:
-            partner_id: Partner ID
-            start_date: Filter by start date (optional)
-            end_date: Filter by end date (optional)
-            status: Filter by status (optional)
-        
+            partner_id: Partner ID.
+            start_date: Filter from date (inclusive).
+            end_date:   Filter to date (inclusive).
+            status:     Filter by status ('pending', 'approved', 'paid').
+
         Returns:
-            Total commission amount
+            Total commission amount as Decimal.
         """
-        filtered_commissions = [
+        filtered = [
             c for c in self.commissions
-            if c.partner_id == partner_id and
-            (start_date is None or c.timestamp >= start_date) and
-            (end_date is None or c.timestamp <= end_date) and
-            (status is None or c.status == status)
+            if c.partner_id == partner_id
+            and (start_date is None or c.timestamp >= start_date)
+            and (end_date is None or c.timestamp <= end_date)
+            and (status is None or c.status == status)
         ]
-        
-        total = sum(c.amount for c in filtered_commissions)
-        return total
-    
+        return sum((c.amount for c in filtered), Decimal('0'))
+
     def get_commissions_by_level(
         self,
         partner_id: int,
         level: int
     ) -> List[CommissionRecord]:
         """
-        Get all commissions for a partner at specific level.
-        
+        Get all commission records for a partner at a specific structural level.
+
         Args:
-            partner_id: Partner ID
-            level: Commission level (1, 2, 3, etc.)
-        
+            partner_id: Partner ID.
+            level:      Structural level (1-5).
+
         Returns:
-            List of commission records
+            List of CommissionRecord.
         """
         return [
             c for c in self.commissions
             if c.partner_id == partner_id and c.level == level
         ]
-    
-    def approve_commission(self, commission_id: int) -> bool:
-        """
-        Approve a commission for payment.
-        
-        Args:
-            commission_id: Commission ID to approve
-        
-        Returns:
-            True if approved, False if not found
-        """
-        for commission in self.commissions:
-            if commission.commission_id == commission_id:
-                commission.status = 'approved'
-                self.logger.info(f"Commission {commission_id} approved")
-                return True
-        
-        self.logger.warning(f"Commission {commission_id} not found")
-        return False
-    
-    def mark_as_paid(self, commission_id: int) -> bool:
-        """
-        Mark commission as paid.
-        
-        Args:
-            commission_id: Commission ID
-        
-        Returns:
-            True if marked, False if not found
-        """
-        for commission in self.commissions:
-            if commission.commission_id == commission_id:
-                commission.status = 'paid'
-                self.logger.info(f"Commission {commission_id} marked as paid")
-                return True
-        
-        self.logger.warning(f"Commission {commission_id} not found")
-        return False
-    
+
     def get_commission_summary(
         self,
         partner_id: int,
@@ -259,37 +274,33 @@ class CommissionCalculator:
         end_date: Optional[datetime] = None
     ) -> Dict:
         """
-        Get commission summary for partner.
-        
-        Args:
-            partner_id: Partner ID
-            start_date: Start date for summary
-            end_date: End date for summary
-        
+        Get a full commission summary for a partner.
+
         Returns:
-            Dictionary with commission summary
+            Dict with totals by status and by level.
         """
         filtered = [
             c for c in self.commissions
-            if c.partner_id == partner_id and
-            (start_date is None or c.timestamp >= start_date) and
-            (end_date is None or c.timestamp <= end_date)
+            if c.partner_id == partner_id
+            and (start_date is None or c.timestamp >= start_date)
+            and (end_date is None or c.timestamp <= end_date)
         ]
-        
-        total = sum(c.amount for c in filtered)
-        pending = sum(c.amount for c in filtered if c.status == 'pending')
-        approved = sum(c.amount for c in filtered if c.status == 'approved')
-        paid = sum(c.amount for c in filtered if c.status == 'paid')
-        
-        by_level = {}
-        for level in range(1, 5):  # Up to level 4
-            level_comms = [c for c in filtered if c.level == level]
-            if level_comms:
-                by_level[f"level_{level}"] = {
-                    'count': len(level_comms),
-                    'total': sum(c.amount for c in level_comms)
+
+        total = sum((c.amount for c in filtered), Decimal('0'))
+        pending = sum((c.amount for c in filtered if c.status == 'pending'), Decimal('0'))
+        approved = sum((c.amount for c in filtered if c.status == 'approved'), Decimal('0'))
+        paid = sum((c.amount for c in filtered if c.status == 'paid'), Decimal('0'))
+
+        by_level: Dict[str, dict] = {}
+        for lvl in range(1, MAX_LEVELS + 1):
+            lvl_records = [c for c in filtered if c.level == lvl]
+            if lvl_records:
+                by_level[f"level_{lvl}"] = {
+                    'count': len(lvl_records),
+                    'total': float(sum((c.amount for c in lvl_records), Decimal('0'))),
+                    'rate': float(self.commission_rates.get(lvl, Decimal('0')))
                 }
-        
+
         return {
             'partner_id': partner_id,
             'total_commissions': float(total),
@@ -299,3 +310,27 @@ class CommissionCalculator:
             'by_level': by_level,
             'commission_count': len(filtered)
         }
+
+    # -----------------------------------------------------------------------
+    # Status management
+    # -----------------------------------------------------------------------
+
+    def approve_commission(self, commission_id: int) -> bool:
+        """Approve a commission for payment."""
+        for c in self.commissions:
+            if c.commission_id == commission_id:
+                c.status = 'approved'
+                self.logger.info(f"Commission {commission_id} approved")
+                return True
+        self.logger.warning(f"Commission {commission_id} not found")
+        return False
+
+    def mark_as_paid(self, commission_id: int) -> bool:
+        """Mark commission as paid."""
+        for c in self.commissions:
+            if c.commission_id == commission_id:
+                c.status = 'paid'
+                self.logger.info(f"Commission {commission_id} marked as paid")
+                return True
+        self.logger.warning(f"Commission {commission_id} not found")
+        return False
