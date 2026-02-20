@@ -1,10 +1,10 @@
 """Main Telegram Bot class for NANOREM MLM System."""
-
 import logging
 from telegram.ext import Application
 from config import BOT_TOKEN
 from .handlers import setup_handlers
 from database.db import init_db
+from scheduler import start_scheduler, stop_scheduler
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +21,11 @@ class TelegramBot:
             .token(BOT_TOKEN)
             .build()
         )
+        self._scheduler = None
         logger.info("TelegramBot initialized successfully.")
 
     def setup(self) -> None:
-        """Register all handlers and prepare the bot."""
+        """Register all handlers, initialize database, and setup scheduler."""
         # Initialize database tables
         init_db()
         logger.info("Database initialized.")
@@ -33,9 +34,17 @@ class TelegramBot:
         setup_handlers(self.application)
         logger.info("Handlers registered.")
 
+        # Setup background scheduler for status expiration
+        self._scheduler = start_scheduler()
+        logger.info("Background scheduler started (Сгорание статуса activated).")
+
     def run(self) -> None:
         """Run the bot using long-polling until stopped."""
         self.setup()
         logger.info("Starting NANOREM MLM bot via polling...")
-        self.application.run_polling(drop_pending_updates=True)
-        logger.info("Bot stopped.")
+        try:
+            self.application.run_polling(drop_pending_updates=True)
+        finally:
+            # Gracefully stop the scheduler when bot stops
+            stop_scheduler()
+            logger.info("Bot stopped.")
