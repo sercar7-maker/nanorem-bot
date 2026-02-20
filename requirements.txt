@@ -3,20 +3,21 @@
 # ============================================================
 
 # --- Telegram Bot Framework ---
-python-telegram-bot>=20.0        # Main bot library (async, PTB v20+)
+python-telegram-bot>=20.0       # Main bot library (async, PTB v20+)
 
 # --- Database (ORM) ---
-SQLAlchemy>=2.0.0                # ORM for SQLite / PostgreSQL
+SQLAlchemy>=2.0.0               # ORM for SQLite / PostgreSQL
 
 # --- PostgreSQL driver (optional, for production) ---
-psycopg2-binary>=2.9.0           # PostgreSQL adapter (skip if using SQLite only)
+psycopg2-binary>=2.9.0          # PostgreSQL adapter (skip if using SQLite only)
 
 # --- HTTP client (used by python-telegram-bot) ---
-aiohttp>=3.8.0                   # Async HTTP client
+aiohttp>=3.8.0                  # Async HTTP client
 
 # --- Environment variables ---
-python-dotenv>=0.19.0            # Load .env file into os.environ
+python-dotenv>=0.19.0           # Load .env file into os.environ
 
 # --- Utilities ---
-requests>=2.28.0                 # HTTP requests (used by integrations)
-pytz>=2023.3                     # Timezone support
+requests>=2.28.0                # HTTP requests (used by integrations)
+pytz>=2023.3                    # Timezone support
+qrcode[pil]>=7.4.2              # QR code generation with Pillow support
