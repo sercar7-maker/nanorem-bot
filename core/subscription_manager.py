@@ -4,37 +4,29 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from database.models import User, UserStatus
+from database.models import Partner, PartnerStatus
 from database.db import get_session
 
 logger = logging.getLogger(__name__)
 
-# Длительность активного статуса в днях
-STATUS_DURATION_DAYS = {
-    UserStatus.PARTNER: 30,
-    UserStatus.SENIOR_PARTNER: 30,
-    UserStatus.LEADER: 30,
-    UserStatus.SENIOR_LEADER: 30,
-    UserStatus.DIRECTOR: 30,
-    UserStatus.PRESIDENT: 30,
-}
+# Duration of active status in days
+STATUS_ACTIVE_DURATION_DAYS = 30
 
 
 class SubscriptionManager:
     """
-    Manages user subscription statuses and automatic expiration (burning).
-    Implements the 'Activation' feature - automatic status expiration.
+    Manages partner subscription statuses and automatic expiration (burning).
+    Implements the 'Activation' feature - automatic status expiration (Сгорание статуса).
     """
 
     @staticmethod
     def activate_status(
-        user_id: int,
-        new_status: UserStatus,
+        telegram_id: str,
+        duration_days: int = STATUS_ACTIVE_DURATION_DAYS,
         session: Optional[Session] = None,
-        duration_days: Optional[int] = None,
     ) -> bool:
         """
-        Activate a new status for the user with expiration date.
+        Activate ACTIVE status for the partner with expiration date.
         Returns True if activation was successful.
         """
         close_session = False
@@ -43,25 +35,25 @@ class SubscriptionManager:
             close_session = True
 
         try:
-            user = session.query(User).filter(User.telegram_id == user_id).first()
-            if not user:
-                logger.warning(f"User {user_id} not found for status activation")
+            partner = session.query(Partner).filter(
+                Partner.telegram_id == str(telegram_id)
+            ).first()
+            if not partner:
+                logger.warning(f"Partner {telegram_id} not found for status activation")
                 return False
 
-            days = duration_days or STATUS_DURATION_DAYS.get(new_status, 30)
-            user.status = new_status
-            user.subscription_end_date = datetime.utcnow() + timedelta(days=days)
-            user.is_active = True
+            partner.status = PartnerStatus.ACTIVE
+            partner.subscription_end_date = datetime.utcnow() + timedelta(days=duration_days)
 
             session.commit()
             logger.info(
-                f"User {user_id} activated to status {new_status.value}, "
-                f"expires at {user.subscription_end_date}"
+                f"Partner {telegram_id} activated, "
+                f"expires at {partner.subscription_end_date}"
             )
             return True
         except Exception as e:
             session.rollback()
-            logger.error(f"Error activating status for user {user_id}: {e}")
+            logger.error(f"Error activating status for partner {telegram_id}: {e}")
             return False
         finally:
             if close_session:
@@ -70,40 +62,38 @@ class SubscriptionManager:
     @staticmethod
     def check_and_expire_statuses() -> int:
         """
-        Check all users and expire (burn) statuses that have passed their end date.
-        Returns the count of expired users.
+        Check all partners and expire (burn) statuses that have passed their end date.
+        Returns the count of expired partners.
         """
         session = get_session()
         expired_count = 0
 
         try:
             now = datetime.utcnow()
-            # Find users with expired subscriptions who still have active statuses
-            expired_users = (
-                session.query(User)
+            # Find partners with expired subscriptions who still have ACTIVE status
+            expired_partners = (
+                session.query(Partner)
                 .filter(
-                    User.subscription_end_date.isnot(None),
-                    User.subscription_end_date < now,
-                    User.status != UserStatus.NEWCOMER,
-                    User.is_active == True,
+                    Partner.subscription_end_date.isnot(None),
+                    Partner.subscription_end_date < now,
+                    Partner.status == PartnerStatus.ACTIVE,
                 )
                 .all()
             )
 
-            for user in expired_users:
-                old_status = user.status
-                user.status = UserStatus.NEWCOMER
-                user.is_active = False
-                user.subscription_end_date = None
+            for partner in expired_partners:
+                old_status = partner.status
+                partner.status = PartnerStatus.INACTIVE
+                partner.subscription_end_date = None
                 expired_count += 1
                 logger.info(
-                    f"User {user.telegram_id} status expired: "
-                    f"{old_status.value} -> NEWCOMER"
+                    f"Partner {partner.telegram_id} status expired: "
+                    f"{old_status.value} -> INACTIVE"
                 )
 
             if expired_count > 0:
                 session.commit()
-                logger.info(f"Expired {expired_count} user statuses")
+                logger.info(f"Expired {expired_count} partner statuses")
 
             return expired_count
         except Exception as e:
@@ -114,63 +104,85 @@ class SubscriptionManager:
             session.close()
 
     @staticmethod
-    def get_days_until_expiry(user_id: int) -> Optional[int]:
+    def get_days_until_expiry(telegram_id: str) -> Optional[int]:
         """
-        Get the number of days until a user's status expires.
-        Returns None if user has no expiry date.
+        Get the number of days until a partner's status expires.
+        Returns None if partner has no expiry date.
         Returns negative number if already expired.
         """
         session = get_session()
         try:
-            user = session.query(User).filter(User.telegram_id == user_id).first()
-            if not user or not user.subscription_end_date:
+            partner = session.query(Partner).filter(
+                Partner.telegram_id == str(telegram_id)
+            ).first()
+            if not partner or not partner.subscription_end_date:
                 return None
-            delta = user.subscription_end_date - datetime.utcnow()
+            delta = partner.subscription_end_date - datetime.utcnow()
             return delta.days
         except Exception as e:
-            logger.error(f"Error getting expiry days for user {user_id}: {e}")
+            logger.error(f"Error getting expiry days for partner {telegram_id}: {e}")
             return None
         finally:
             session.close()
 
     @staticmethod
-    def is_status_active(user_id: int) -> bool:
+    def is_status_active(telegram_id: str) -> bool:
         """
-        Check if user's current status is still active (not expired).
-        """
-        days = SubscriptionManager.get_days_until_expiry(user_id)
-        if days is None:
-            return True  # No expiry = permanent (e.g. NEWCOMER)
-        return days >= 0
-
-    @staticmethod
-    def renew_status(user_id: int, additional_days: int = 30) -> bool:
-        """
-        Extend user's current status by additional_days.
+        Check if partner's current status is still active (not expired).
         """
         session = get_session()
         try:
-            user = session.query(User).filter(User.telegram_id == user_id).first()
-            if not user:
+            partner = session.query(Partner).filter(
+                Partner.telegram_id == str(telegram_id)
+            ).first()
+            if not partner:
+                return False
+            if partner.status != PartnerStatus.ACTIVE:
+                return False
+            if partner.subscription_end_date is None:
+                return True  # No expiry = permanent active
+            return partner.subscription_end_date > datetime.utcnow()
+        except Exception as e:
+            logger.error(f"Error checking active status for partner {telegram_id}: {e}")
+            return False
+        finally:
+            session.close()
+
+    @staticmethod
+    def renew_status(telegram_id: str, additional_days: int = 30) -> bool:
+        """
+        Extend partner's current ACTIVE status by additional_days.
+        """
+        session = get_session()
+        try:
+            partner = session.query(Partner).filter(
+                Partner.telegram_id == str(telegram_id)
+            ).first()
+            if not partner:
                 return False
 
-            if user.subscription_end_date and user.subscription_end_date > datetime.utcnow():
+            if (
+                partner.subscription_end_date
+                and partner.subscription_end_date > datetime.utcnow()
+            ):
                 # Extend from current end date
-                user.subscription_end_date += timedelta(days=additional_days)
+                partner.subscription_end_date += timedelta(days=additional_days)
             else:
                 # Start fresh from now
-                user.subscription_end_date = datetime.utcnow() + timedelta(days=additional_days)
+                partner.subscription_end_date = datetime.utcnow() + timedelta(
+                    days=additional_days
+                )
 
-            user.is_active = True
+            partner.status = PartnerStatus.ACTIVE
             session.commit()
             logger.info(
-                f"User {user_id} status renewed by {additional_days} days, "
-                f"new expiry: {user.subscription_end_date}"
+                f"Partner {telegram_id} status renewed by {additional_days} days, "
+                f"new expiry: {partner.subscription_end_date}"
             )
             return True
         except Exception as e:
             session.rollback()
-            logger.error(f"Error renewing status for user {user_id}: {e}")
+            logger.error(f"Error renewing status for partner {telegram_id}: {e}")
             return False
         finally:
             session.close()
