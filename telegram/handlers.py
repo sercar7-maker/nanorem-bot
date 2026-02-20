@@ -1,5 +1,7 @@
 \"\"\"Command handlers setup for NANOREM MLM Telegram Bot.\"\"\"
 import logging
+import io
+import qrcode
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from database.db import get_session
@@ -55,13 +57,13 @@ async def register_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             upline_id=upline_id,
         )
         session.add(new_partner)
-        # Session auto-commits on exit from get_session context manager
         
     if upline_id:
         await notify_new_referral(upline_id, user.first_name or user.username)
         
     bot_username = (await context.bot.get_me()).username
     ref_link = f\"https://t.me/{bot_username}?start={user.id}\"
+    
     await update.message.reply_text(
         \"🎉 Регистрация успешно завершена! \"
         f\"Ваша реферальная ссылка: `{ref_link}`\",
@@ -69,7 +71,7 @@ async def register_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     )
 
 async def purchase_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    \"\"\"Handle manual purchase for testing (will be replaced by automated integration).\"\"\"
+    \"\"\"Handle manual purchase for testing.\"\"\"
     user = update.effective_user
     if not context.args or not context.args[0].replace('.', '', 1).isdigit():
         await update.message.reply_text(\"Использование: /purchase [сумма]\")
@@ -83,7 +85,6 @@ async def purchase_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await update.message.reply_text(\"Сначала зарегистрируйтесь: /register\")
             return
             
-        # Create purchase record
         import time
         purchase = Purchase(
             purchase_number=f\"TEST-{user.id}-{int(time.time())}\",
@@ -92,9 +93,8 @@ async def purchase_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             status=\"paid\"
         )
         session.add(purchase)
-        session.flush() # Get purchase ID
+        session.flush()
         
-        # Calculate and distribute commissions
         calculator = CommissionCalculator()
         commissions = calculator.calculate_commissions(partner.id, amount)
         
@@ -110,7 +110,6 @@ async def purchase_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             )
             session.add(new_comm)
             
-            # Update partner totals
             beneficiary = session.query(Partner).get(comm_data['partner_id'])
             if beneficiary:
                 beneficiary.total_commissions += comm_data['commission_amount']
@@ -149,7 +148,7 @@ async def network_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.message.reply_text(msg, parse_mode='Markdown')
 
 async def profile_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    \"\"\"Show partner's profile and statistics.\"\"\"
+    \"\"\"Show partner's profile, statistics and referral QR code.\"\"\"
     user = update.effective_user
     with get_session() as session:
         partner = session.query(Partner).filter(Partner.telegram_id == str(user.id)).first()
@@ -163,6 +162,18 @@ async def profile_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         bot_username = (await context.bot.get_me()).username
         ref_link = f\"https://t.me/{bot_username}?start={user.id}\"
         
+        # Generate QR code
+        qr = qrcode.QRCode(version=1, box_size=10, border=5)
+        qr.add_data(ref_link)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color=\"black\", back_color=\"white\")
+        
+        # Save to bytes
+        bio = io.BytesIO()
+        bio.name = 'referral_qr.png'
+        img.save(bio, 'PNG')
+        bio.seek(0)
+        
         msg = (
             f\"👤 *Ваш профиль* \"
             f\"🆔 ID: `{user.id}` \"
@@ -171,7 +182,12 @@ async def profile_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             f\"🛒 Личный оборот: *{personal_volume:.2f}* руб. \"
             f\"🔗 Ссылка: `{ref_link}`\"
         )
-        await update.message.reply_text(msg, parse_mode='Markdown')
+        
+        await update.message.reply_photo(
+            photo=bio,
+            caption=msg,
+            parse_mode='Markdown'
+        )
 
 async def info_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     \"\"\"Display marketing plan information.\"\"\"
