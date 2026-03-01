@@ -1,6 +1,6 @@
 """Partner Management Module for NANOREM MLM System
 
-Handles partner profiles, registration, status tracking, and integration 
+Handles partner profiles, registration, status tracking, and integration
 with the MLM NetworkManager and CommissionCalculator.
 """
 from typing import Optional, List, Dict
@@ -14,9 +14,9 @@ logger = logging.getLogger(__name__)
 
 class PartnerStatus(Enum):
     """Partner status enumeration."""
-    ACTIVE = "active"        # Paid (3,000 monthly or 10,000 annual)
-    INACTIVE = "inactive"    # Unpaid (loss of percentage, leads to compression)
-    SUSPENDED = "suspended"  # Manual hold
+    ACTIVE = "active"       # Paid (3,000 monthly or 10,000 annual)
+    INACTIVE = "inactive"  # Unpaid (loss of percentage, leads to compression)
+    SUSPENDED = "suspended" # Manual hold
     TERMINATED = "terminated" # Deleted after 1 year of inactivity
 
 
@@ -32,11 +32,11 @@ class Partner:
     status: PartnerStatus = PartnerStatus.ACTIVE
     registration_date: datetime = field(default_factory=datetime.now)
     last_activity_date: datetime = field(default_factory=datetime.now)
-    
+
     # Financial metrics (accumulated)
-    total_procurement: float = 0.0   # Total purchase volume
-    total_commissions: float = 0.0   # Total earned commissions
-    
+    total_procurement: float = 0.0  # Total purchase volume
+    total_commissions: float = 0.0  # Total earned commissions
+
     def get_full_name(self) -> str:
         """Get partner full name."""
         return f"{self.first_name} {self.last_name}"
@@ -49,28 +49,28 @@ class Partner:
 
 class PartnerManager:
     """
-    Manager for partner operations in NANOREM MLM system.
-    
-    Orchestrates:
+    Partner manager for the NANOREM MLM system.
+
+    Handles:
     - Partner registration.
     - Status updates (Active/Inactive/Terminated).
-    - Accumulation of sales and commission totals.
+    - Accumulation of sales amounts and commissions.
     """
 
     def __init__(self, network_manager=None):
         """
-        Initialize partner manager.
-        
+        Initialize the partner manager.
+
         Args:
-            network_manager: Optional instance of NetworkManager to keep
-                             in sync with partner status changes.
+            network_manager: Optional NetworkManager instance for syncing
+                             with partner status changes.
         """
         self.partners: Dict[int, Partner] = {}
         self.network_manager = network_manager
         self.logger = logger
 
     # -----------------------------------------------------------------------
-    # Registration & Lookup
+    # Registration and lookup
     # -----------------------------------------------------------------------
 
     def register_partner(
@@ -86,7 +86,7 @@ class PartnerManager:
         Register a new partner and add them to the network.
         """
         if partner_id in self.partners:
-            self.logger.warning(f"Partner ID {partner_id} already registered.")
+            self.logger.warning(f"Partner with ID {partner_id} already registered.")
             return self.partners[partner_id]
 
         partner = Partner(
@@ -99,7 +99,7 @@ class PartnerManager:
         )
 
         self.partners[partner_id] = partner
-        
+
         # Sync with network manager
         if self.network_manager:
             self.network_manager.add_partner(partner_id, upline_id)
@@ -108,11 +108,11 @@ class PartnerManager:
         return partner
 
     def get_partner(self, partner_id: int) -> Optional[Partner]:
-        """Lookup partner by ID."""
+        """Find a partner by ID."""
         return self.partners.get(partner_id)
 
     # -----------------------------------------------------------------------
-    # Status & Activity
+    # Status and activity
     # -----------------------------------------------------------------------
 
     def update_status(self, partner_id: int, new_status: PartnerStatus) -> bool:
@@ -125,13 +125,11 @@ class PartnerManager:
 
         old_status = partner.status
         partner.status = new_status
-        
+
         self.logger.info(
             f"Partner {partner_id} status changed: {old_status} -> {new_status}"
         )
 
-        # If partner becomes inactive/terminated, notify network manager 
-        # to trigger structural compression if needed.
         if self.network_manager:
             if new_status in [PartnerStatus.INACTIVE, PartnerStatus.TERMINATED]:
                 self.network_manager.deactivate_partner(partner_id)
@@ -149,11 +147,11 @@ class PartnerManager:
         return False
 
     # -----------------------------------------------------------------------
-    # Financial Updates
+    # Financial updates
     # -----------------------------------------------------------------------
 
     def add_procurement_volume(self, partner_id: int, amount: float) -> bool:
-        """Add to partner's total purchase volume."""
+        """Add to partner's total procurement volume."""
         partner = self.get_partner(partner_id)
         if not partner:
             return False
@@ -163,7 +161,8 @@ class PartnerManager:
     def add_commission_earned(self, partner_id: int, amount: float) -> bool:
         """Add to partner's total earned commissions."""
         partner = self.get_partner(partner_id)
-Refactor partner_manager.py: Sync with NetworkManager, updated statuses, financial metrics            return False
+        if not partner:
+            return False
         partner.total_commissions += amount
         return True
 
@@ -176,11 +175,11 @@ Refactor partner_manager.py: Sync with NetworkManager, updated statuses, financi
         return [p for p in self.partners.values() if p.is_active]
 
     def get_partner_summary(self, partner_id: int) -> Dict:
-        """Return a summary dict for the partner."""
+        """Return a summary dict for a partner."""
         p = self.get_partner(partner_id)
         if not p:
             return {}
-        
+
         return {
             "id": p.partner_id,
             "name": p.get_full_name(),
