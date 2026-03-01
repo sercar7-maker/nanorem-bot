@@ -10,7 +10,7 @@ from telegram.ext import Application
 from config import BOT_TOKEN
 from .handlers import setup_handlers
 from database.db import init_db
-from scheduler import start_scheduler, stop_scheduler
+from scheduler import setup_scheduler
 
 logger = logging.getLogger(__name__)
 
@@ -22,34 +22,36 @@ class TelegramBot:
         """Initialize bot application with token."""
         if not BOT_TOKEN:
             raise ValueError("BOT_TOKEN is not set in configuration!")
+
+        self._scheduler = None
+
         self.application: Application = (
             Application.builder()
             .token(BOT_TOKEN)
+            .post_init(self._post_init)
+            .post_shutdown(self._post_shutdown)
             .build()
         )
-        self._scheduler = None
+
         logger.info("TelegramBot initialized successfully.")
 
-    def setup(self) -> None:
-        """Register all handlers, initialize database, and set up scheduler."""
-        # Initialize database tables
+    async def _post_init(self, application: Application) -> None:
+        """Called after application is initialized - start scheduler here."""
         init_db()
-        logger.info("Database initialized.")
+        setup_handlers(application)
 
-        # Register command handlers
-        setup_handlers(self.application)
-        logger.info("Handlers registered.")
+        self._scheduler = setup_scheduler()
+        if not self._scheduler.running:
+            self._scheduler.start()
+            logger.info("[Scheduler] Started inside event loop successfully")
 
-        # Set up background scheduler for status expiration
-        self._scheduler = start_scheduler()
-        logger.info("Background scheduler started.")
+    async def _post_shutdown(self, application: Application) -> None:
+        """Called on shutdown - stop scheduler."""
+        if self._scheduler and self._scheduler.running:
+            self._scheduler.shutdown(wait=False)
+            logger.info("[Scheduler] Stopped")
 
     def run(self) -> None:
-        """Run the bot using long polling until stopped."""
-        self.setup()
-        logger.info("Starting NANOREM MLM bot via polling...")
-        try:
-            self.application.run_polling(drop_pending_updates=True)
-        finally:
-            stop_scheduler()
-            logger.info("Bot stopped.")
+        """Run the bot using polling."""
+        logger.info("Starting NANOREM MLM Bot polling...")
+        self.application.run_polling(drop_pending_updates=True)
