@@ -1,6 +1,7 @@
 """Command handlers setup for NANOREM MLM Telegram Bot."""
 import logging
 import io
+import time
 import qrcode
 from datetime import datetime
 
@@ -25,10 +26,10 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if args and args[0].isdigit():
         ref_id = int(args[0])
         context.user_data['upline_id'] = ref_id
-        logger.info(f"User {user.id} came from referral {ref_id}")
+        logger.info(f"User {user.id} came via referral link {ref_id}")
 
-    message = (
-        f"Привет, {user.first_name}! "
+    msg = (
+        f"Привет, {user.first_name}!"
         "Добро пожаловать в систему NANOREM MLM.\n"
         "Используйте команду:\n"
         "/register - зарегистрироваться в системе\n"
@@ -39,8 +40,8 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "/help - справка"
     )
     if ref_id:
-        message += f"\n Вы приглашены ID партнёра: {ref_id}"
-    await update.message.reply_text(message)
+        msg += f"\n Вы приглашены ID партнёра: {ref_id}"
+    await update.message.reply_text(msg)
 
 
 async def register_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -79,7 +80,7 @@ async def register_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def purchase_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Perform a manual purchase for testing."""
+    """Perform a purchase manually for testing."""
     user = update.effective_user
     if not context.args or not context.args[0].replace('.', '', 1).isdigit():
         await update.message.reply_text("Использование: /purchase [сумма]")
@@ -95,7 +96,6 @@ async def purchase_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await update.message.reply_text("Сначала зарегистрируйтесь: /register")
             return
 
-        import time
         purchase = Purchase(
             purchase_number=f"TEST-{user.id}-{int(time.time())}",
             partner_id=partner.id,
@@ -130,7 +130,7 @@ async def purchase_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def network_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show the user's referral network structure."""
+    """Show user's referral network structure."""
     user = update.effective_user
     with get_session() as session:
         partner = session.query(Partner).filter(
@@ -166,7 +166,7 @@ async def network_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def profile_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show partner profile, stats, subscription status, and referral QR code."""
+    """Show partner profile, stats, subscription status and referral QR code."""
     user = update.effective_user
     with get_session() as session:
         partner = session.query(Partner).filter(
@@ -203,32 +203,28 @@ async def profile_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             else:
                 expiry_text = "\n🔴 Статус истёк, требуется продление."
 
-        partner_id_val = partner.telegram_id
-        subscription_end = partner.subscription_end_date
+        bot_username = (await context.bot.get_me()).username
+        ref_link = f"https://t.me/{bot_username}?start={user.id}"
 
-    bot_username = (await context.bot.get_me()).username
-    ref_link = f"https://t.me/{bot_username}?start={user.id}"
+        # Generate QR code
+        qr = qrcode.QRCode(version=1, box_size=10, border=5)
+        qr.add_data(ref_link)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
 
-    # Generate QR code
-    qr = qrcode.QRCode(version=1, box_size=10, border=5)
-    qr.add_data(ref_link)
-    qr.make(fit=True)
-    img = qr.make_image(fill_color="black", back_color="white")
+        bio = io.BytesIO()
+        bio.name = 'referral_qr.png'
+        img.save(bio, 'PNG')
+        bio.seek(0)
 
-    # Save to bytes
-    bio = io.BytesIO()
-    bio.name = 'referral_qr.png'
-    img.save(bio, 'PNG')
-    bio.seek(0)
-
-    msg = (
-        f"👤 *Ваш профиль*\n"
-        f"🆔 ID: `{user.id}`\n"
-        f"📊 Статус: {status_icon} {status_text}{expiry_text}\n"
-        f"💰 Заработано: *{total_earned:.2f}* руб.\n"
-        f"🛒 Личный оборот: *{personal_volume:.2f}* руб.\n"
-        f"🔗 Ссылка: `{ref_link}`"
-    )
+        msg = (
+            f"👤 *Ваш профиль*\n"
+            f"🆔 ID: `{user.id}`\n"
+            f"📊 Статус: {status_icon} {status_text}{expiry_text}\n"
+            f"💰 Заработано: *{total_earned:.2f}* руб.\n"
+            f"🛒 Личный оборот: *{personal_volume:.2f}* руб.\n"
+            f"🔗 Ссылка: `{ref_link}`"
+        )
 
     await update.message.reply_photo(
         photo=bio,
@@ -238,13 +234,13 @@ async def profile_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def activate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Activate partner status for 30 days (admin command or test)."""
+    """Activate partner status for 30 days (admin or test command)."""
     user = update.effective_user
     success = subscription_manager.activate_status(str(user.id))
     if success:
         days_left = subscription_manager.get_days_until_expiry(str(user.id))
         await update.message.reply_text(
-            f"✅ Ваш статус активирован на {days_left} дней!"
+            f"✅ Ваш статус активирован на {days_left} дн!"
         )
     else:
         await update.message.reply_text(
@@ -259,7 +255,7 @@ async def info_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "1 линия: *20%*\n"
         "2 линия: *10%*\n"
         "3-5 линии: *5%*\n"
-        "💰 Начисления от суммы закупки материалов.\n"
+        "💰 Начисления от суммы закупок.\n"
         "⚡️ Система компрессии вверх."
     )
     await update.message.reply_text(msg, parse_mode='Markdown')
