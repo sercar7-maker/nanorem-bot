@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from config import BOT_TOKEN, DEBUG
-from telegram.bot import TelegramBot
+from tgbot.bot import TelegramBot
 
 
 def configure_logging(debug: bool = False) -> None:
