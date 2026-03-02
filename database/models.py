@@ -1,5 +1,4 @@
 """Database Models for NANOREM MLM System using SQLAlchemy
-
 This module defines the schema for partners, purchases (orders),
 and commissions, synchronized with the core MLM logic.
 """
@@ -75,13 +74,13 @@ class Purchase(Base):
 
     id = Column(Integer, primary_key=True)
     purchase_number = Column(String(50), unique=True, nullable=False)
+
     partner_id = Column(Integer, ForeignKey('partners.id'), nullable=False, index=True)
 
     amount = Column(Float, nullable=False)
     currency = Column(String(10), default='RUB')
-    status = Column(String(20), default='pending')
-
-    ext_ref = Column(String(100))
+    status = Column(SQLEnum(OrderStatus), default=OrderStatus.PENDING)
+    ext_ref = Column(String(100))  # external reference (invoice id, etc.)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     paid_at = Column(DateTime)
@@ -90,7 +89,7 @@ class Purchase(Base):
     commissions = relationship('Commission', back_populates='purchase')
 
     def __repr__(self):
-        return f"<Purchase id={self.id} amount={self.amount} status={self.status}>"
+        return f"<Purchase id={self.id} number={self.purchase_number} amount={self.amount}>"
 
 
 class Commission(Base):
