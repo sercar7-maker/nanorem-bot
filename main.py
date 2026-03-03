@@ -34,6 +34,7 @@ def main() -> None:
 
     logger.info("Initializing NANOREM MLM Telegram Bot...")
 
+    print(">>> DATABASE INIT START <<<")
     logger.info("Initializing database...")
     init_db()
 
