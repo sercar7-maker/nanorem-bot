@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 # Import Base from models to enable table creation
 from .models import Base
+from . import user_models  # важно: регистрируем User
 from config import DATABASE_URL
 
 logger = logging.getLogger(__name__)
