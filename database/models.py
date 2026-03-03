@@ -123,4 +123,20 @@ class Commission(Base):
     source_partner = relationship('Partner', foreign_keys=[source_partner_id])
 
     def __repr__(self):
-        return f"<Commission id={self.id} level={self.level} amount={self.amount}>"
+        return f"<Commission id={self.id} level={self.level} amount={self.amount}>"import uuid
+
+
+class ConsentVersion(Base):
+    """Version of personal data processing consent text."""
+    __tablename__ = "consent_versions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    version = Column(String(20), unique=True, nullable=False)
+    file_path = Column(String(255), nullable=False)
+    hash = Column(String(64), nullable=False)  # SHA256 = 64 hex chars
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    def __repr__(self):
+        return f"<ConsentVersion version={self.version}>"
