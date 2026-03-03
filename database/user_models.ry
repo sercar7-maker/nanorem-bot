@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum as PyEnum
 import uuid
 
-from models import Base  # импортируем существующий Base
+from .models import Base  # импортируем существующий Base
 
 
 class UserStatus(PyEnum):
