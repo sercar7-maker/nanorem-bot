@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from config import BOT_TOKEN, DEBUG
 from tgbot.bot import TelegramBot
+from database.db import init_db
 
 
 def configure_logging(debug: bool = False) -> None:
@@ -32,9 +33,9 @@ def main() -> None:
         sys.exit(1)
 
     logger.info("Initializing NANOREM MLM Telegram Bot...")
+
+    logger.info("Initializing database...")
+    init_db()
+
     bot = TelegramBot()
     bot.run()
-
-
-if __name__ == "__main__":
-    main()
