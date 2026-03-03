@@ -140,3 +140,6 @@ class ConsentVersion(Base):
 
     def __repr__(self):
         return f"<ConsentVersion version={self.version}>"
+        
+# Ensure User model is registered
+from .user_models import User
