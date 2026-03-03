@@ -6,6 +6,7 @@ from datetime import datetime
 from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Enum as SQLEnum, Text, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
+from sqlalchemy.dialects.postgresql import UUID
 import enum
 
 Base = declarative_base()
@@ -58,9 +59,11 @@ class Partner(Base):
     # Accumulated totals
     total_procurement = Column(Float, default=0.0)
     total_commissions = Column(Float, default=0.0)
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), unique=True, nullable=True)
 
     # Relationships
     upline = relationship('Partner', remote_side=[id], backref='downline')
+    user = relationship('User', backref='partner', uselist=False)
     purchases = relationship('Purchase', back_populates='partner')
     commissions_earned = relationship('Commission', foreign_keys='Commission.partner_id', back_populates='partner')
 
