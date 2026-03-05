@@ -41,7 +41,10 @@ class Partner(Base):
     __tablename__ = 'partners'
 
     id = Column(Integer, primary_key=True)
+
     telegram_id = Column(String(50), unique=True, index=True)
+    telegram_link_code = Column(String(10), nullable=True)
+
     first_name = Column(String(100), nullable=False)
     last_name = Column(String(100))
     username = Column(String(100))
@@ -60,13 +63,18 @@ class Partner(Base):
     # Accumulated totals
     total_procurement = Column(Float, default=0.0)
     total_commissions = Column(Float, default=0.0)
+
     user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), unique=True, nullable=True)
 
     # Relationships
     upline = relationship('Partner', remote_side=[id], backref='downline')
     user = relationship('User', backref='partner', uselist=False)
     purchases = relationship('Purchase', back_populates='partner')
-    commissions_earned = relationship('Commission', foreign_keys='Commission.partner_id', back_populates='partner')
+    commissions_earned = relationship(
+        'Commission',
+        foreign_keys='Commission.partner_id',
+        back_populates='partner'
+    )
 
     def __repr__(self):
         return f"<Partner id={self.id} telegram_id={self.telegram_id} status={self.status}>"
@@ -124,7 +132,8 @@ class Commission(Base):
     source_partner = relationship('Partner', foreign_keys=[source_partner_id])
 
     def __repr__(self):
-        return f"<Commission id={self.id} level={self.level} amount={self.amount}>"import uuid
+        return f"<Commission id={self.id} level={self.level} amount={self.amount}>"
+        import uuid
 
 
 class ConsentVersion(Base):

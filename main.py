@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from config import BOT_TOKEN, DEBUG
-from tgbot.bot import TelegramBot
+from tg_handlers.bot import TelegramBot
 from database.db import init_db
 
 
@@ -34,9 +34,15 @@ def main() -> None:
 
     logger.info("Initializing NANOREM MLM Telegram Bot...")
 
-    print(">>> DATABASE INIT START <<<")
-    logger.info("Initializing database...")
-    init_db()
+print(">>> DATABASE INIT START <<<")
+init_db()
 
-    bot = TelegramBot()
-    bot.run()
+print("STEP 1")
+bot = TelegramBot()
+print("STEP 2")
+bot.run()
+print("STEP 3")
+
+
+if __name__ == "__main__":
+    main()

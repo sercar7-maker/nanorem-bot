@@ -1,9 +1,8 @@
-"""Main Telegram Bot class for NANOREM MLM System."""
+﻿"""Main Telegram Bot class for NANOREM MLM System."""
 import logging
 import sys
 import os
 
-# Ensure the system telegram library is used, not the local folder
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from telegram.ext import Application
@@ -38,7 +37,9 @@ class TelegramBot:
     async def _post_init(self, application: Application) -> None:
         """Called after application is initialized - start scheduler here."""
         init_db()
+        logger.info("Database initialized.")
         setup_handlers(application)
+        logger.info("Handlers registered.")
 
         self._scheduler = setup_scheduler()
         if not self._scheduler.running:
