@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>NANOREM Registration</title>
+    <meta charset="utf-8">
+</head>
+<body>
+
+<h2>Регистрация партнёра NANOREM</h2>
+
+<form method="post" action="/register">
+
+    <label>Имя:</label><br>
+    <input type="text" name="first_name" required><br><br>
+
+    <label>Фамилия:</label><br>
+    <input type="text" name="last_name" required><br><br>
+
+    <label>Email:</label><br>
+    <input type="email" name="email" required><br><br>
+
+    <label>Телефон:</label><br>
+    <input type="text" name="phone" required><br><br>
+
+    <input type="hidden" name="ref" value="{{ ref if ref else 1 }}">
+
+    <button type="submit">Зарегистрироваться</button>
+
+</form>
+
+</body>
+</html>

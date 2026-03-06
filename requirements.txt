@@ -24,3 +24,9 @@ qrcode[pil]>=7.4.2             # QR code generation with Pillow support
 
 # --- Scheduler ---
 apscheduler>=3.10.0            # Async task scheduler for status expiration (Сгорание статуса)
+
+# --- Web Registration (FastAPI) ---
+fastapi>=0.110.0
+uvicorn>=0.29.0
+jinja2>=3.1.0
+python-multipart>=0.0.9

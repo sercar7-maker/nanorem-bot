@@ -1,210 +1,164 @@
-"""Command handlers setup for NANOREM MLM Telegram Bot."""
 import logging
-import io
-import time
-import qrcode
-from datetime import datetime
+import uuid
 
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import Update, ReplyKeyboardMarkup
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from sqlalchemy import func
+
 from database.db import get_session
 from database.models import Partner, Commission, Purchase, PartnerStatus
-from sqlalchemy import func
-from core.commission import CommissionCalculator
-from core.subscription_manager import subscription_manager
-from .notifications import notify_new_referral
 
 logger = logging.getLogger(__name__)
 
 
-async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /start command with referral support."""
+async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user
-    args = context.args
 
-    # Проверяем, есть ли партнёр в базе
-    with get_session() as session:
+    keyboard = [
+        ["👤 Профиль", "💰 Баланс"],
+        ["🛒 Закупка", "🌐 Сеть"]
+    ]
 
-        # ищем партнёра уже привязанного к Telegram
-        partner = session.query(Partner).filter(
-            Partner.telegram_id == str(user.id)
-        ).first()
-
-        # если не нашли — пытаемся найти по username Telegram
-        if not partner and user.username:
-            partner = session.query(Partner).filter(
-                Partner.username == user.username
-            ).first()
-
-            # если нашли — привязываем Telegram
-            if partner:
-                partner.telegram_id = str(user.id)
-                session.commit()
-                logger.info(f"Telegram {user.id} linked to partner {partner.id}")
-
-    # Если партнёр не найден — отправляем на сайт регистрации
-    if not partner:
-        await update.message.reply_text(
-            "Вы ещё не зарегистрированы в системе.\n\n"
-            "Пожалуйста пройдите регистрацию на сайте:\n"
-            "https://nanorem.example/register"
-        )
-        return
-
-    # Проверка реферальной ссылки
-    ref_id = None
-    if args and args[0].isdigit():
-        ref_id = int(args[0])
-        context.user_data['upline_id'] = ref_id
-        logger.info(f"User {user.id} came via referral link {ref_id}")
-
-    # Основное приветственное сообщение
-    msg = (
-        f"Привет, {user.first_name}!\n\n"
-        "Добро пожаловать в систему NANOREM MLM.\n\n"
-        "Доступные команды:\n"
-        "/profile - мой личный кабинет\n"
-        "/network - моя команда\n"
-        "/purchase [сумма] - закупка (тест)\n"
-        "/info - условия начислений\n"
-        "/help - справка"
+    reply_markup = ReplyKeyboardMarkup(
+        keyboard,
+        resize_keyboard=True
     )
 
-    if ref_id:
-        msg += f"\n\nВы приглашены партнёром ID: {ref_id}"
-
-    await update.message.reply_text(msg)
-
-
-async def register_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Register a new partner in the system."""
-    user = update.effective_user
-    upline_id = context.user_data.get('upline_id')
-
-    with get_session() as session:
-        partner = session.query(Partner).filter(
-            Partner.telegram_id == str(user.id)
-        ).first()
-        if partner:
-            await update.message.reply_text("Вы уже зарегистрированы!")
-            return
-
-        new_partner = Partner(
-            telegram_id=str(user.id),
-            first_name=user.first_name or "",
-            last_name=user.last_name,
-            username=user.username,
-            upline_id=upline_id,
-        )
-        session.add(new_partner)
-
-        if upline_id:
-            await notify_new_referral(upline_id, user.first_name or user.username)
-
-    bot_username = (await context.bot.get_me()).username
-    ref_link = f"https://t.me/{bot_username}?start={user.id}"
+    msg = (
+        f"👋 Привет, {user.first_name}!\n\n"
+        "Добро пожаловать в систему партнёров NANOREM.\n"
+        "Выберите действие:"
+    )
 
     await update.message.reply_text(
-        "🎉 Регистрация успешно завершена!\n"
-        f"Ваша реферальная ссылка: `{ref_link}`",
-        parse_mode='Markdown'
+        msg,
+        reply_markup=reply_markup
     )
 
 
-async def purchase_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Perform a purchase manually for testing."""
+async def profile_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    try:
+        user = update.effective_user
+
+        with get_session() as session:
+
+            partner = session.query(Partner).filter(
+                Partner.telegram_id == str(user.id)
+            ).first()
+
+            if not partner:
+                await update.message.reply_text("Вы не зарегистрированы.")
+                return
+
+            partner_id = partner.id
+
+            total_earned = (
+                session.query(func.sum(Commission.amount))
+                .filter(Commission.partner_id == partner_id)
+                .scalar() or 0
+            )
+
+            personal_volume = (
+                session.query(func.sum(Purchase.amount))
+                .filter(Purchase.partner_id == partner_id)
+                .scalar() or 0
+            )
+
+            status = "Активен" if partner.status == PartnerStatus.ACTIVE else "Неактивен"
+
+        msg = (
+            f"👤 Ваш профиль\n\n"
+            f"🆔 ID: {user.id}\n"
+            f"📊 Статус: {status}\n\n"
+            f"💰 Баланс: {total_earned:.2f} руб\n"
+            f"💰 Всего заработано: {total_earned:.2f} руб\n"
+            f"🛒 Личный оборот: {personal_volume:.2f} руб\n\n"
+            f"🔗 Ваша реферальная ссылка:\n"
+            f"https://t.me/nanorem_bot?start={partner_id}"
+        )
+
+        await update.message.reply_text(msg)
+
+    except Exception as e:
+        logger.exception("Ошибка в profile_handler")
+        await update.message.reply_text(f"Ошибка профиля: {e}")
+
+
+async def purchase_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     user = update.effective_user
-    if not context.args or not context.args[0].replace('.', '', 1).isdigit():
-        await update.message.reply_text("Использование: /purchase [сумма]")
+
+    if not context.args:
+        await update.message.reply_text("Использование: /purchase 1000")
         return
 
-    amount = float(context.args[0])
+    try:
+        amount = float(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Введите число.")
+        return
 
     with get_session() as session:
+
         partner = session.query(Partner).filter(
             Partner.telegram_id == str(user.id)
         ).first()
+
         if not partner:
-            await update.message.reply_text("Сначала зарегистрируйтесь: /register")
+            await update.message.reply_text("Вы не зарегистрированы.")
             return
 
         purchase = Purchase(
-            purchase_number=f"TEST-{user.id}-{int(time.time())}",
+            purchase_number=f"PUR-{uuid.uuid4().hex[:8]}",
             partner_id=partner.id,
             amount=amount,
-            status="paid"
+            currency="RUB",
+            status="PENDING"
         )
+
         session.add(purchase)
-        session.flush()
-
-        calculator = CommissionCalculator()
-        commissions = calculator.calculate_commissions(partner.id, amount)
-
-        for comm_data in commissions:
-            new_comm = Commission(
-                partner_id=comm_data['partner_id'],
-                purchase_id=purchase.id,
-                source_partner_id=partner.id,
-                level=comm_data['level'],
-                rate=comm_data['rate'],
-                base_amount=amount,
-                amount=comm_data['commission_amount']
-            )
-            session.add(new_comm)
-
-            beneficiary = session.query(Partner).get(comm_data['partner_id'])
-            if beneficiary:
-                beneficiary.total_commissions += comm_data['commission_amount']
+        session.commit()
 
     await update.message.reply_text(
-        f"✅ Закупка на {amount} руб. внесена! Комиссии распределены."
+        f"Закупка зарегистрирована: {amount:.2f} руб"
     )
 
 
-async def network_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show user's referral network structure."""
+async def network_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     user = update.effective_user
+
     with get_session() as session:
+
         partner = session.query(Partner).filter(
             Partner.telegram_id == str(user.id)
         ).first()
+
         if not partner:
-            await update.message.reply_text("Сначала зарегистрируйтесь: /register")
+            await update.message.reply_text("Вы не зарегистрированы.")
             return
 
-        level_counts = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
-        current_level_ids = [partner.id]
+        count = session.query(Partner).filter(
+            Partner.upline_id == partner.id
+        ).count()
 
-        for level in range(1, 6):
-            next_level_partners = session.query(Partner).filter(
-                Partner.upline_id.in_(current_level_ids)
-            ).all()
-            if not next_level_partners:
-                break
-            level_counts[level] = len(next_level_partners)
-            current_level_ids = [p.id for p in next_level_partners]
-
-        total_team = sum(level_counts.values())
-        msg = (
-            f"👥 *Ваша команда*\n"
-            f"Всего партнёров: *{total_team}*\n"
-            f"1 линия: *{level_counts[1]}*\n"
-            f"2 линия: *{level_counts[2]}*\n"
-            f"3 линия: *{level_counts[3]}*\n"
-            f"4 линия: *{level_counts[4]}*\n"
-            f"5 линия: *{level_counts[5]}*"
-        )
-    await update.message.reply_text(msg, parse_mode='Markdown')
+    await update.message.reply_text(
+        f"👥 Партнёров в первой линии: {count}"
+    )
 
 
-async def profile_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show partner profile, stats, subscription status and referral QR code."""
+async def balance_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     user = update.effective_user
+
     with get_session() as session:
+
         partner = session.query(Partner).filter(
             Partner.telegram_id == str(user.id)
         ).first()
+
         if not partner:
             await update.message.reply_text("Вы не зарегистрированы.")
             return
@@ -212,132 +166,47 @@ async def profile_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         total_earned = (
             session.query(func.sum(Commission.amount))
             .filter(Commission.partner_id == partner.id)
-            .scalar() or 0.0
-        )
-        personal_volume = (
-            session.query(func.sum(Purchase.amount))
-            .filter(Purchase.partner_id == partner.id)
-            .scalar() or 0.0
+            .scalar() or 0
         )
 
-        # Subscription status
-        is_active = partner.status == PartnerStatus.ACTIVE
-        status_icon = "✅" if is_active else "❌"
-        status_text = "Активен" if is_active else "Неактивен"
-
-        # Days until expiry
-        expiry_text = ""
-        if is_active and partner.subscription_end_date:
-            days_left = (partner.subscription_end_date - datetime.utcnow()).days
-            if days_left > 0:
-                expiry_text = f"\n⏳ Статус действует ещё: *{days_left}* дн."
-            elif days_left == 0:
-                expiry_text = "\n⚠️ Статус истекает сегодня!"
-            else:
-                expiry_text = "\n🔴 Статус истёк, требуется продление."
-
-        bot_username = (await context.bot.get_me()).username
-        ref_link = f"https://t.me/{bot_username}?start={user.id}"
-
-        # Generate QR code
-        qr = qrcode.QRCode(version=1, box_size=10, border=5)
-        qr.add_data(ref_link)
-        qr.make(fit=True)
-        img = qr.make_image(fill_color="black", back_color="white")
-
-        bio = io.BytesIO()
-        bio.name = 'referral_qr.png'
-        img.save(bio, 'PNG')
-        bio.seek(0)
-
-        msg = (
-            f"👤 *Ваш профиль*\n"
-            f"🆔 ID: `{user.id}`\n"
-            f"📊 Статус: {status_icon} {status_text}{expiry_text}\n"
-            f"💰 Заработано: *{total_earned:.2f}* руб.\n"
-            f"🛒 Личный оборот: *{personal_volume:.2f}* руб.\n"
-            f"🔗 Ссылка: `{ref_link}`"
-        )
-
-    await update.message.reply_photo(
-        photo=bio,
-        caption=msg,
-        parse_mode='Markdown'
+    msg = (
+        f"💰 Ваш баланс\n\n"
+        f"💵 Доступный баланс: {total_earned:.2f} руб"
     )
 
+    await update.message.reply_text(msg)
 
-async def link_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    print("LINK HANDLER CALLED")
 
-    """Link Telegram account with partner account using one-time code."""
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    logger.debug(f"button_handler received text: '{text}'")
 
-    user = update.effective_user
-
-    if not context.args:
-        await update.message.reply_text(
-            "Использование:\n/link КОД"
-        )
+    # Normalize whitespace and case
+    if not text:
+        await update.message.reply_text("Пустой текст получен.")
         return
 
-    code = context.args[0]
+    normalized = text.strip()
 
-    with get_session() as session:
-
-        partner = session.query(Partner).filter(
-            Partner.telegram_link_code == code
-        ).first()
-
-        if not partner:
-            await update.message.reply_text(
-                "❌ Неверный код привязки."
-            )
-            return
-
-        partner.telegram_id = str(user.id)
-        partner.telegram_link_code = None
-        session.commit()
-
-    await update.message.reply_text(
-        "✅ Telegram успешно привязан к вашему аккаунту."
-    )
-
-
-async def activate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Activate partner status for 30 days (admin or test command)."""
-    user = update.effective_user
-    success = subscription_manager.activate_status(str(user.id))
-    if success:
-        days_left = subscription_manager.get_days_until_expiry(str(user.id))
-        await update.message.reply_text(
-            f"✅ Ваш статус активирован на {days_left} дн!"
-        )
+    if normalized == "👤 Профиль":
+        await profile_handler(update, context)
+    elif normalized == "💰 Баланс":
+        await balance_handler(update, context)
+    elif normalized == "🛒 Закупка":
+        await update.message.reply_text("Используйте команду: /purchase [сумма]")
+    elif normalized == "🌐 Сеть":
+        await network_handler(update, context)
     else:
-        await update.message.reply_text(
-            "❌ Не удалось активировать статус. Сначала зарегистрируйтесь: /register"
-        )
+        await update.message.reply_text("Неизвестная команда. Используйте /start для меню.")
 
 
-async def info_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Display marketing plan information."""
-    msg = (
-        "📊 *Маркетинг-план NANOREM*\n"
-        "1 линия: *20%*\n"
-        "2 линия: *10%*\n"
-        "3-5 линии: *5%*\n"
-        "💰 Начисления от суммы закупок.\n"
-        "⚡️ Система компрессии вверх."
-    )
-    await update.message.reply_text(msg, parse_mode='Markdown')
+def setup_handlers(app: Application):
 
-
-def setup_handlers(app: Application) -> None:
-    """Register all command handlers."""
     app.add_handler(CommandHandler("start", start_handler))
-    app.add_handler(CommandHandler("register", register_handler))
+    app.add_handler(CommandHandler("profile", profile_handler))
     app.add_handler(CommandHandler("purchase", purchase_handler))
     app.add_handler(CommandHandler("network", network_handler))
-    app.add_handler(CommandHandler("profile", profile_handler))
-    app.add_handler(CommandHandler("activate", activate_handler))
-    app.add_handler(CommandHandler("info", info_handler))
-    app.add_handler(CommandHandler("link", link_handler))
-    app.add_handler(CommandHandler("help", start_handler))
+    app.add_handler(CommandHandler("balance", balance_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, button_handler))
+    
+    logger.info("Handlers registered")
