@@ -18,9 +18,11 @@ class TelegramBot:
         if not BOT_TOKEN:
             raise ValueError("BOT_TOKEN is not set in configuration!")
 
-    self.application: Application = (
-        Application.builder()
-        .token
+        self.application: Application = (
+            Application.builder()
+            .token(BOT_TOKEN)
+            .build()
+        )
 
     def run(self) -> None:
         """Run the bot using polling."""

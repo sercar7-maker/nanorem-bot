@@ -17,7 +17,8 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = [
         ["👤 Профиль", "💰 Баланс"],
-        ["🛒 Закупка", "🌐 Сеть"]
+        ["🛒 Закупка", "🌐 Сеть"],
+        ["👥 Пригласить партнёра"]
     ]
 
     reply_markup = ReplyKeyboardMarkup(
@@ -196,8 +197,31 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Используйте команду: /purchase [сумма]")
     elif normalized == "🌐 Сеть":
         await network_handler(update, context)
+    elif normalized == "👥 Пригласить партнёра":
+        user = update.effective_user
+
+        with get_session() as session:
+            partner = session.query(Partner).filter(
+                Partner.telegram_id == str(user.id)
+            ).first()
+
+            if not partner:
+                await update.message.reply_text("Вы не зарегистрированы.")
+                return
+
+            link = f"https://t.me/nanorem_bot?start={partner.id}"
+
+        invite_msg = (
+            "👥 Приглашение партнёров\n\n"
+            "Ваша реферальная ссылка:\n"
+            f"{link}\n\n"
+            "Отправьте её партнёру для регистрации."
+        )
+
+        await update.message.reply_text(invite_msg)
+
     else:
-        await update.message.reply_text("Неизвестная команда. Используйте /start для меню.")
+        return
 
 
 def setup_handlers(app: Application):
