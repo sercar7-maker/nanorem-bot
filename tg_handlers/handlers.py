@@ -14,6 +14,43 @@ logger = logging.getLogger(__name__)
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user
+    args = context.args
+
+    with get_session() as session:
+
+        # Проверяем существует ли партнёр
+        partner = session.query(Partner).filter(
+            Partner.telegram_id == str(user.id)
+        ).first()
+
+        # Если партнёра нет — создаём
+        if not partner:
+
+            upline_id = None
+
+            # если есть реферальный параметр
+            if args:
+                try:
+                    upline_id = int(args[0])
+                except:
+                    upline_id = None
+
+            partner = Partner(
+                telegram_id=str(user.id),
+                first_name=user.first_name or "",
+                username=user.username,
+                upline_id=upline_id,
+                status=PartnerStatus.ACTIVE
+            )
+
+            session.add(partner)
+            session.commit()
+
+        msg = (
+            f"Привет, {user.first_name}!\n\n"
+            "Добро пожаловать в систему NANOREM.\n\n"
+            "Выберите действие из меню."
+        )
 
     keyboard = [
         ["👤 Профиль", "💰 Баланс"],
@@ -26,16 +63,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         resize_keyboard=True
     )
 
-    msg = (
-        f"👋 Привет, {user.first_name}!\n\n"
-        "Добро пожаловать в систему партнёров NANOREM.\n"
-        "Выберите действие:"
-    )
-
-    await update.message.reply_text(
-        msg,
-        reply_markup=reply_markup
-    )
+    await update.message.reply_text(msg, reply_markup=reply_markup)
 
 
 async def profile_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -141,13 +169,43 @@ async def network_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Вы не зарегистрированы.")
             return
 
-        count = session.query(Partner).filter(
+        # 1 линия
+        line1_ids = session.query(Partner.id).filter(
             Partner.upline_id == partner.id
-        ).count()
+        ).all()
+        line1_count = len(line1_ids)
 
-    await update.message.reply_text(
-        f"👥 Партнёров в первой линии: {count}"
+        # 2 линия
+        line1_list = [p[0] for p in line1_ids]
+        line2_ids = []
+
+        if line1_list:
+            line2_ids = session.query(Partner.id).filter(
+                Partner.upline_id.in_(line1_list)
+            ).all()
+
+        line2_count = len(line2_ids)
+
+        # 3 линия
+        line2_list = [p[0] for p in line2_ids]
+        line3_count = 0
+
+        if line2_list:
+            line3_count = session.query(Partner).filter(
+                Partner.upline_id.in_(line2_list)
+            ).count()
+
+        total = line1_count + line2_count + line3_count
+
+    msg = (
+        f"🌐 Ваша сеть\n\n"
+        f"👥 1 линия: {line1_count}\n"
+        f"👥 2 линия: {line2_count}\n"
+        f"👥 3 линия: {line3_count}\n\n"
+        f"📊 Всего партнёров: {total}"
     )
+
+    await update.message.reply_text(msg)
 
 
 async def balance_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
