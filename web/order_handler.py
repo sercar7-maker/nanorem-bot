@@ -1,48 +1,46 @@
-"""Order handling module for nanorvs.ru integration."""
-
 import logging
-from typing import Dict, Any
-from sqlalchemy.orm import Session
+
+from web.api_client import NanorvsAPIClient
+from core.commission import CommissionCalculator
+from core.network import NetworkManager
 
 from database.db import SessionLocal
 from database.models import Commission
-from core.network import NetworkManager
-from core.commission import CommissionCalculator
-from .api_client import NanorvsAPIClient
+from services.commission_service import CommissionService
 
 logger = logging.getLogger(__name__)
 
 
 class OrderHandler:
-    """Handle orders from nanorvs.ru and process MLM commissions."""
 
-    def __init__(
-        self,
-        api_client: NanorvsAPIClient,
-        commission_calculator: CommissionCalculator,
-    ):
+    def __init__(self, api_client: NanorvsAPIClient, commission_calculator: CommissionCalculator):
         self.api_client = api_client
         self.commission_calculator = commission_calculator
+        self.network_manager = NetworkManager()
+
         logger.info("Initialized OrderHandler")
 
-    def process_order(self, order_data: Dict[str, Any]) -> bool:
-        """Process order and calculate MLM commissions."""
-
-        session: Session = SessionLocal()
+    def process_order(self, order_data: dict):
 
         try:
-            order_id = order_data.get("id")
-            partner_id = order_data.get("partner_id")
-            amount = order_data.get("total_amount", 0)
+
+            order_id = order_data["id"]
+            partner_id = order_data["partner_id"]
+            amount = order_data["total_amount"]
 
             logger.info(f"Processing order {order_id} for partner {partner_id}")
             logger.info(f"Order data received: {order_data}")
 
-            # ---------- NETWORK ----------
-            network = NetworkManager()
-            upline_chain = network.get_upline_chain(partner_id)
+            # -------------------------------------------------
+            # Build upline chain
+            # -------------------------------------------------
 
-            # ---------- CALCULATE COMMISSIONS ----------
+            upline_chain = self.network_manager.get_upline_chain(partner_id)
+
+            # -------------------------------------------------
+            # Calculate commissions
+            # -------------------------------------------------
+
             commissions = self.commission_calculator.calculate_purchase_commissions(
                 purchase_amount=amount,
                 buying_partner_id=partner_id,
@@ -51,26 +49,36 @@ class OrderHandler:
 
             logger.info(f"Calculated {len(commissions)} commissions for purchase by {partner_id}")
 
-            # ---------- SAVE COMMISSIONS ----------
+            # -------------------------------------------------
+            # Save commissions + credit balance
+            # -------------------------------------------------
+
+            session = SessionLocal()
+            commission_service = CommissionService(session)
+
             for c in commissions:
 
-                db_commission = Commission(
+                commission = Commission(
                     partner_id=c.partner_id,
-                    source_partner_id=partner_id,
                     purchase_id=order_id,
+                    source_partner_id=partner_id,
                     level=c.level,
                     rate=c.rate,
-                    base_amount=c.base_amount,
-                    amount=c.amount,
-                    status="PENDING",
-                    is_compressed=c.compressed
+                    base_amount=amount,
+                    amount=c.amount
                 )
 
-                session.add(db_commission)
+                session.add(commission)
+                session.commit()
 
-            session.commit()
+                commission_service.approve_commission(commission)
 
-            # ---------- REPORT SALE ----------
+            session.close()
+
+            # -------------------------------------------------
+            # Report sale to external API
+            # -------------------------------------------------
+
             self.api_client.update_partner_sales(
                 partner_id,
                 {
@@ -81,20 +89,19 @@ class OrderHandler:
                             "partner_id": c.partner_id,
                             "level": c.level,
                             "rate": c.rate,
-                            "amount": c.amount,
+                            "amount": c.amount
                         }
                         for c in commissions
-                    ],
-                },
+                    ]
+                }
             )
 
             logger.info(f"Successfully processed order {order_id}")
+
             return True
 
         except Exception as e:
-            session.rollback()
-            logger.error(f"Failed to process order: {e}")
-            return False
 
-        finally:
-            session.close()
+            logger.error(f"Failed to process order: {e}")
+
+            return False
