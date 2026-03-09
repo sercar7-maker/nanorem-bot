@@ -8,7 +8,7 @@ api_client = NanorvsAPIClient()
 partner_manager = PartnerManager()
 calculator = CommissionCalculator()
 
-handler = OrderHandler(api_client, partner_manager, calculator)
+handler = OrderHandler(api_client, calculator)
 
 # тестовый заказ
 test_order = {
