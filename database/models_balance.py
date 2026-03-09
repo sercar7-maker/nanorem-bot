@@ -16,21 +16,32 @@ from database.base import Base
 
 
 class BalanceTransactionType(Enum):
-
     COMMISSION = "commission"
     WITHDRAWAL = "withdrawal"
-    CORRECTION = "correction"
+    ADJUSTMENT = "adjustment"
 
 
 class Balance(Base):
 
     __tablename__ = "balances"
 
-    partner_id = Column(Integer, primary_key=True)
+    partner_id = Column(
+        Integer,
+        ForeignKey("partners.id"),
+        primary_key=True
+    )
 
-    amount = Column(Numeric(18, 2), nullable=False, default=0)
+    amount = Column(
+        Numeric(18, 2),
+        nullable=False,
+        default=0
+    )
 
-    hold = Column(Numeric(18, 2), nullable=False, default=0)
+    hold = Column(
+        Numeric(18, 2),
+        nullable=False,
+        default=0
+    )
 
     transactions = relationship(
         "BalanceTransaction",
@@ -52,25 +63,25 @@ class BalanceTransaction(Base):
     partner_id = Column(
         Integer,
         ForeignKey("balances.partner_id"),
-        index=True,
-        nullable=False
+        nullable=False,
+        index=True
     )
 
-    amount = Column(Numeric(18, 2), nullable=False)
+    amount = Column(
+        Numeric(18, 2),
+        nullable=False
+    )
 
     type = Column(
         SQLAlchemyEnum(BalanceTransactionType),
         nullable=False
     )
 
-    reference_id = Column(Integer, nullable=True)
-
-    external_id = Column(String, unique=True, nullable=True)
+    description = Column(String)
 
     created_at = Column(
         DateTime,
-        server_default=func.now(),
-        nullable=False
+        server_default=func.now()
     )
 
     balance = relationship(
