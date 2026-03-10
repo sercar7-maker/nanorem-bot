@@ -8,11 +8,12 @@ from database.models import Partner, PartnerStatus
 logger = logging.getLogger(__name__)
 
 
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user
-    telegram_id = user.id
-    username = user.username or ""
+    telegram_id = str(user.id)
+    username = user.username
+    first_name = user.first_name
 
     # код из /start CODE
     code = None
@@ -57,8 +58,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # КНОПКИ МЕНЮ
     keyboard = [
-        ["💰 Баланс", "👥 Моя сеть"],
-        ["🔗 Реферальная ссылка", "📊 Статистика"]
+        ["👤 Профиль", "💰 Баланс"],
+        ["👥 Моя сеть", "🔗 Реферальная ссылка"],
+        ["📊 Статистика", "🌐 Сайт"]
     ]
 
     reply_markup = ReplyKeyboardMarkup(
@@ -66,8 +68,14 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         resize_keyboard=True
     )
 
-    await update.message.reply_text(text, reply_markup=reply_markup)
+    await update.message.reply_text(
+        f"""👋 Привет, {first_name}!
+
+Добро пожаловать в систему партнёров NANOREM.
+Выберите действие:""",
+        reply_markup=reply_markup
+    )
 
 
 def get_handler():
-    return CommandHandler("start", start_command)
+    return CommandHandler("start", start_handler)
