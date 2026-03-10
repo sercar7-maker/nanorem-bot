@@ -34,14 +34,16 @@ def main() -> None:
 
     logger.info("Initializing NANOREM MLM Telegram Bot...")
 
-print(">>> DATABASE INIT START <<<")
-init_db()
+    print(">>> DATABASE INIT START <<<")
+    init_db()
 
-print("STEP 1")
-bot = TelegramBot()
-print("STEP 2")
-bot.run()
-print("STEP 3")
+    print("STEP 1")
+    bot = TelegramBot()
+
+    print("STEP 2")
+    bot.run()
+
+    print("STEP 3")
 
 
 if __name__ == "__main__":

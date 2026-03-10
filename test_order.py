@@ -12,9 +12,9 @@ handler = OrderHandler(api_client, calculator)
 
 # тестовый заказ
 test_order = {
-    "id": 1001,
+    "id": 1002,
     "partner_id": 2,
-    "total_amount": 1000
+        "total_amount": 1000
 }
 
 handler.process_order(test_order)

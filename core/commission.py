@@ -5,13 +5,21 @@ from typing import List, Tuple
 logger = logging.getLogger(__name__)
 
 
+from dataclasses import dataclass
+from decimal import Decimal, ROUND_HALF_UP
+from typing import List, Tuple
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 @dataclass
 class CommissionResult:
     partner_id: int
     level: int
-    rate: float
-    base_amount: float
-    amount: float
+    rate: Decimal
+    base_amount: Decimal
+    amount: Decimal
     compressed: bool = False
     notes: str = ""
 
@@ -22,11 +30,17 @@ class CommissionCalculator:
     """
 
     # проценты по уровням
-    LEVEL_RATES = [0.10, 0.05, 0.03, 0.02, 0.01]
+    LEVEL_RATES = [
+        Decimal("0.20"),  # 1 линия
+        Decimal("0.10"),  # 2 линия
+        Decimal("0.05"),  # 3 линия
+        Decimal("0.05"),  # 4 линия
+        Decimal("0.05"),  # 5 линия
+    ]
 
     def calculate_purchase_commissions(
         self,
-        purchase_amount: float,
+        purchase_amount: Decimal,
         buying_partner_id: int,
         upline_chain: List[Tuple[int, bool]]
     ) -> List[CommissionResult]:
@@ -51,14 +65,16 @@ class CommissionCalculator:
                         level=level,
                         rate=rate,
                         base_amount=purchase_amount,
-                        amount=0,
+                        amount=Decimal("0.00"),
                         compressed=True,
                         notes="Partner inactive"
                     )
                 )
                 continue
 
-            amount = purchase_amount * rate
+            amount = (purchase_amount * rate).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
 
             commissions.append(
                 CommissionResult(

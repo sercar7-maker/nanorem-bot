@@ -28,19 +28,21 @@ class OrderHandler:
             partner_id = order_data["partner_id"]
             amount = order_data["total_amount"]
 
+            session = SessionLocal()
+
+            existing = session.query(Commission).filter_by(purchase_id=order_id).first()
+            if existing:
+                logger.warning(f"Order {order_id} already processed")
+                session.close()
+                return True
+
             logger.info(f"Processing order {order_id} for partner {partner_id}")
             logger.info(f"Order data received: {order_data}")
 
-            # -------------------------------------------------
             # Build upline chain
-            # -------------------------------------------------
-
             upline_chain = self.network_manager.get_upline_chain(partner_id)
 
-            # -------------------------------------------------
             # Calculate commissions
-            # -------------------------------------------------
-
             commissions = self.commission_calculator.calculate_purchase_commissions(
                 purchase_amount=amount,
                 buying_partner_id=partner_id,
@@ -49,11 +51,7 @@ class OrderHandler:
 
             logger.info(f"Calculated {len(commissions)} commissions for purchase by {partner_id}")
 
-            # -------------------------------------------------
-            # Save commissions + credit balance
-            # -------------------------------------------------
-
-            session = SessionLocal()
+            # Save commissions
             commission_service = CommissionService(session)
 
             for c in commissions:
@@ -69,27 +67,24 @@ class OrderHandler:
                 )
 
                 session.add(commission)
-                session.commit()
 
                 commission_service.approve_commission(commission)
 
+            session.commit()
             session.close()
 
-            # -------------------------------------------------
             # Report sale to external API
-            # -------------------------------------------------
-
             self.api_client.update_partner_sales(
                 partner_id,
                 {
                     "order_id": order_id,
-                    "amount": amount,
+                    "amount": float(amount),
                     "commissions": [
                         {
                             "partner_id": c.partner_id,
                             "level": c.level,
-                            "rate": c.rate,
-                            "amount": c.amount
+                            "rate": float(c.rate),
+                            "amount": float(c.amount)
                         }
                         for c in commissions
                     ]

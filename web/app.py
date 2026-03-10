@@ -8,6 +8,13 @@ import string
 from database.db import get_session
 from database.models import Partner, PartnerStatus
 
+# MLM imports
+from web.api_client import NanorvsAPIClient
+from core.commission import CommissionCalculator
+from web.order_handler import OrderHandler
+from web.webhook import WebhookHandler
+
+
 app = FastAPI()
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -79,7 +86,6 @@ async def register_user(
         session.add(partner)
         session.commit()
 
-    # Кнопка автопривязки Telegram
     return HTMLResponse(f"""
     <html>
     <head>
@@ -119,3 +125,30 @@ async def register_user(
     </body>
     </html>
     """)
+
+
+# -------------------------------
+# Инициализация MLM webhook
+# -------------------------------
+
+api_client = NanorvsAPIClient()
+calculator = CommissionCalculator()
+order_handler = OrderHandler(api_client, calculator)
+webhook_handler = WebhookHandler(order_handler)
+
+
+# -------------------------------
+# Webhook endpoint
+# -------------------------------
+
+@app.post("/webhook")
+async def webhook_endpoint(request: Request):
+
+    payload = await request.json()
+
+    event_type = payload.get("event_type")
+    data = payload.get("data")
+
+    result = webhook_handler.handle_webhook(event_type, data)
+
+    return {"success": result}
