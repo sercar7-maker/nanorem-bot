@@ -15,10 +15,12 @@ class TelegramBot:
     """Main bot class for NANOREM MLM Telegram Bot."""
 
     def __init__(self) -> None:
+
         if not BOT_TOKEN:
             raise ValueError("BOT_TOKEN is not set in configuration!")
 
-        self.application: Application = (
+        # создаём Telegram Application без использования системного прокси
+        self.application = (
             Application.builder()
             .token(BOT_TOKEN)
             .build()
@@ -26,6 +28,7 @@ class TelegramBot:
 
     def run(self) -> None:
         """Run the bot using polling."""
+
         print(">>> TELEGRAM BOT STARTED <<<")
 
         logger.info("Initializing database...")

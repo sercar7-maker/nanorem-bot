@@ -1,5 +1,5 @@
 import logging
-from telegram import Update
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes, CommandHandler
 
 from database.db import SessionLocal
@@ -8,36 +8,32 @@ from database.models import Partner
 logger = logging.getLogger(__name__)
 
 
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user
-    telegram_id = user.id
-    username = user.username or ""
+    first_name = user.first_name
 
-    session = SessionLocal()
+    text = f"""👋 Привет, {first_name}!
 
-    partner = session.query(Partner).filter_by(id=telegram_id).first()
+Добро пожаловать в систему партнёров NANOREM.
+Выберите действие:"""
 
-    if not partner:
+    keyboard = [
+        ["👤 Профиль", "💰 Баланс"],
+        ["👥 Моя сеть", "🔗 Реферальная ссылка"],
+        ["📊 Статистика", "🌐 Сайт"]
+    ]
 
-        partner = Partner(
-            id=telegram_id,
-            username=username
-        )
+    reply_markup = ReplyKeyboardMarkup(
+        keyboard,
+        resize_keyboard=True
+    )
 
-        session.add(partner)
-        session.commit()
-
-        text = "✅ Вы зарегистрированы в системе NANOREM MLM"
-
-    else:
-
-        text = "👋 С возвращением!"
-
-    session.close()
-
-    await update.message.reply_text(text)
+    await update.message.reply_text(
+        text,
+        reply_markup=reply_markup
+    )
 
 
 def get_handler():
-    return CommandHandler("start", start_command)
+    return CommandHandler("start", start_handler)

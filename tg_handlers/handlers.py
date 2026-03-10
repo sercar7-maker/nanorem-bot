@@ -1,4 +1,5 @@
 import logging
+from telegram.ext import MessageHandler, filters
 
 from web.api_client import NanorvsAPIClient
 from core.commission import CommissionCalculator
@@ -30,7 +31,6 @@ class OrderHandler:
 
             session = SessionLocal()
 
-            # защита от двойного webhook
             existing = session.query(Commission).filter_by(purchase_id=order_id).first()
             if existing:
                 logger.warning(f"Order {order_id} already processed")
@@ -38,21 +38,15 @@ class OrderHandler:
                 return True
 
             logger.info(f"Processing order {order_id} for partner {partner_id}")
-            logger.info(f"Order data received: {order_data}")
 
-            # Build upline chain
             upline_chain = self.network_manager.get_upline_chain(partner_id)
 
-            # Calculate commissions
             commissions = self.commission_calculator.calculate_purchase_commissions(
                 purchase_amount=amount,
                 buying_partner_id=partner_id,
                 upline_chain=upline_chain
             )
 
-            logger.info(f"Calculated {len(commissions)} commissions for purchase by {partner_id}")
-
-            # Save commissions
             commission_service = CommissionService(session)
 
             for c in commissions:
@@ -68,13 +62,11 @@ class OrderHandler:
                 )
 
                 session.add(commission)
-
                 commission_service.approve_commission(commission)
 
             session.commit()
             session.close()
 
-            # Report sale to external API
             self.api_client.update_partner_sales(
                 partner_id,
                 {
@@ -103,10 +95,39 @@ class OrderHandler:
             return False
 
 
-def setup_handlers(application):
+async def button_handler(update, context):
 
-    from tg_handlers.balance import get_handler
+    text = update.message.text
+
+    if text == "💰 Баланс":
+        await update.message.reply_text("Ваш баланс")
+
+    elif text == "👤 Профиль":
+        await update.message.reply_text("Ваш профиль")
+
+    elif text == "👥 Моя сеть":
+        await update.message.reply_text("Ваша сеть")
+
+    elif text == "🔗 Реферальная ссылка":
+        await update.message.reply_text("Ваша реферальная ссылка")
+
+    elif text == "📊 Статистика":
+        await update.message.reply_text("Ваша статистика")
+
+    elif text == "🌐 Сайт":
+        await update.message.reply_text("https://nanorem.ru")
+
+
+def setup_handlers(application):
 
     logger.info("Registering Telegram handlers")
 
-    application.add_handler(get_handler())
+    from tg_handlers.start import get_handler as start_handler
+    from tg_handlers.balance import get_handler as balance_handler
+
+    application.add_handler(start_handler())
+    application.add_handler(balance_handler())
+
+    application.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, button_handler)
+    )
