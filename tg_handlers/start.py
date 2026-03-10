@@ -1,9 +1,9 @@
 import logging
-from telegram import Update
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes, CommandHandler
 
 from database.db import SessionLocal
-from database.models import Partner
+from database.models import Partner, PartnerStatus
 
 logger = logging.getLogger(__name__)
 
@@ -14,29 +14,59 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     telegram_id = user.id
     username = user.username or ""
 
+    # код из /start CODE
+    code = None
+    if context.args:
+        code = context.args[0]
+
     session = SessionLocal()
 
-    partner = session.query(Partner).filter_by(id=telegram_id).first()
+    # если код есть — пытаемся привязать Telegram
+    if code:
 
-    if not partner:
+        partner = session.query(Partner).filter_by(telegram_link_code=code).first()
 
-        partner = Partner(
-            id=telegram_id,
-            username=username
-        )
+        if partner:
 
-        session.add(partner)
-        session.commit()
+            partner.telegram_id = telegram_id
+            partner.username = username
+            partner.status = PartnerStatus.ACTIVE
 
-        text = "✅ Вы зарегистрированы в системе NANOREM MLM"
+            session.commit()
+
+            text = "✅ Telegram успешно привязан к вашему аккаунту!"
+
+        else:
+
+            text = "❌ Неверный код привязки."
 
     else:
 
-        text = "👋 С возвращением!"
+        # пользователь просто написал /start
+        partner = session.query(Partner).filter_by(telegram_id=telegram_id).first()
+
+        if partner:
+
+            text = "👋 Добро пожаловать в NANOREM MLM"
+
+        else:
+
+            text = "Вы не зарегистрированы. Зарегистрируйтесь на сайте."
 
     session.close()
 
-    await update.message.reply_text(text)
+    # КНОПКИ МЕНЮ
+    keyboard = [
+        ["💰 Баланс", "👥 Моя сеть"],
+        ["🔗 Реферальная ссылка", "📊 Статистика"]
+    ]
+
+    reply_markup = ReplyKeyboardMarkup(
+        keyboard,
+        resize_keyboard=True
+    )
+
+    await update.message.reply_text(text, reply_markup=reply_markup)
 
 
 def get_handler():
