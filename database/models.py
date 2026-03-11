@@ -52,7 +52,12 @@ class Partner(Base):
     id = Column(Integer, primary_key=True)
 
     telegram_id = Column(String, unique=True, nullable=True)
-    telegram_link_code = Column(String, unique=True)
+
+    telegram_link_code = Column(
+        String,
+        unique=True,
+        default=lambda: str(uuid.uuid4())[:8]
+    )
 
     first_name = Column(String)
     last_name = Column(String)

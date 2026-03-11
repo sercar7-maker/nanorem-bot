@@ -15,17 +15,18 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = user.username
     first_name = user.first_name
 
-    # код из /start CODE
     code = None
     if context.args:
         code = context.args[0]
 
     session = SessionLocal()
 
-    # если код есть — пытаемся привязать Telegram
+    # попытка привязки по реферальному коду
     if code:
 
-        partner = session.query(Partner).filter_by(telegram_link_code=code).first()
+        partner = session.query(Partner).filter(
+            Partner.telegram_link_code == code
+        ).first()
 
         if partner:
 
@@ -43,20 +44,17 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     else:
 
-        # пользователь просто написал /start
-        partner = session.query(Partner).filter_by(telegram_id=telegram_id).first()
+        partner = session.query(Partner).filter(
+            Partner.telegram_id == telegram_id
+        ).first()
 
         if partner:
-
             text = "👋 Добро пожаловать в NANOREM MLM"
-
         else:
-
             text = "Вы не зарегистрированы. Зарегистрируйтесь на сайте."
 
     session.close()
 
-    # КНОПКИ МЕНЮ
     keyboard = [
         ["👤 Профиль", "💰 Баланс"],
         ["👥 Моя сеть", "🔗 Реферальная ссылка"],
