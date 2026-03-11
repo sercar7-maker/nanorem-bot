@@ -17,7 +17,6 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     commissions = session.query(Commission).filter_by(partner_id=user_id).all()
 
     balance = sum(c.amount for c in commissions)
-
     count = len(commissions)
 
     session.close()

@@ -1,121 +1,81 @@
 import logging
 from telegram.ext import MessageHandler, filters
 
-from web.api_client import NanorvsAPIClient
-from core.commission import CommissionCalculator
-from core.network import NetworkManager
-
-from database.db import SessionLocal
-from database.models import Commission
-from services.commission_service import CommissionService
+from services.partner_service import PartnerService
 
 logger = logging.getLogger(__name__)
-
-
-class OrderHandler:
-
-    def __init__(self, api_client: NanorvsAPIClient, commission_calculator: CommissionCalculator):
-        self.api_client = api_client
-        self.commission_calculator = commission_calculator
-        self.network_manager = NetworkManager()
-
-        logger.info("Initialized OrderHandler")
-
-    def process_order(self, order_data: dict):
-
-        try:
-
-            order_id = order_data["id"]
-            partner_id = order_data["partner_id"]
-            amount = order_data["total_amount"]
-
-            session = SessionLocal()
-
-            existing = session.query(Commission).filter_by(purchase_id=order_id).first()
-            if existing:
-                logger.warning(f"Order {order_id} already processed")
-                session.close()
-                return True
-
-            logger.info(f"Processing order {order_id} for partner {partner_id}")
-
-            upline_chain = self.network_manager.get_upline_chain(partner_id)
-
-            commissions = self.commission_calculator.calculate_purchase_commissions(
-                purchase_amount=amount,
-                buying_partner_id=partner_id,
-                upline_chain=upline_chain
-            )
-
-            commission_service = CommissionService(session)
-
-            for c in commissions:
-
-                commission = Commission(
-                    partner_id=c.partner_id,
-                    purchase_id=order_id,
-                    source_partner_id=partner_id,
-                    level=c.level,
-                    rate=c.rate,
-                    base_amount=amount,
-                    amount=c.amount
-                )
-
-                session.add(commission)
-                commission_service.approve_commission(commission)
-
-            session.commit()
-            session.close()
-
-            self.api_client.update_partner_sales(
-                partner_id,
-                {
-                    "order_id": order_id,
-                    "amount": float(amount),
-                    "commissions": [
-                        {
-                            "partner_id": c.partner_id,
-                            "level": c.level,
-                            "rate": float(c.rate),
-                            "amount": float(c.amount)
-                        }
-                        for c in commissions
-                    ]
-                }
-            )
-
-            logger.info(f"Successfully processed order {order_id}")
-
-            return True
-
-        except Exception as e:
-
-            logger.error(f"Failed to process order: {e}")
-
-            return False
 
 
 async def button_handler(update, context):
 
     text = update.message.text
+    telegram_id = str(update.effective_user.id)
+
+    partner_service = PartnerService()
+
+    partner = partner_service.get_partner_by_telegram_id(telegram_id)
+
+    if not partner:
+        await update.message.reply_text(
+            "Вы не зарегистрированы как партнёр."
+        )
+        return
 
     if text == "💰 Баланс":
-        await update.message.reply_text("Ваш баланс")
+
+        balance = partner_service.get_partner_balance(partner.id)
+
+        await update.message.reply_text(
+            f"Ваш баланс: {balance:.2f} ₽"
+        )
 
     elif text == "👤 Профиль":
-        await update.message.reply_text("Ваш профиль")
+
+        await update.message.reply_text(
+            f"Партнёр ID: {partner.id}\n"
+            f"Дата регистрации: {partner.registration_date}"
+        )
 
     elif text == "👥 Моя сеть":
-        await update.message.reply_text("Ваша сеть")
+
+        levels = partner_service.get_network_levels(partner.id)
+
+        message = (
+            "Структура вашей сети:\n\n"
+            f"1 уровень — {levels[1]} партнёров\n"
+            f"2 уровень — {levels[2]} партнёров\n"
+            f"3 уровень — {levels[3]} партнёров\n"
+            f"4 уровень — {levels[4]} партнёров\n"
+            f"5 уровень — {levels[5]} партнёров"
+        )
+
+        await update.message.reply_text(message)
 
     elif text == "🔗 Реферальная ссылка":
-        await update.message.reply_text("Ваша реферальная ссылка")
+
+        await update.message.reply_text(
+            f"https://t.me/nanorem_bot?start={partner.telegram_link_code}"
+        )
 
     elif text == "📊 Статистика":
-        await update.message.reply_text("Ваша статистика")
+
+        stats = partner_service.get_partner_stats(partner.id)
+        balance = partner_service.get_partner_balance(partner.id)
+
+        message = (
+            "📊 Ваша статистика\n\n"
+            f"Партнёров в сети: {stats['partners']}\n"
+            f"Всего комиссий: {stats['commission']:.2f} ₽\n"
+            f"Ваш баланс: {balance:.2f} ₽"
+        )
+
+        await update.message.reply_text(message)
 
     elif text == "🌐 Сайт":
-        await update.message.reply_text("https://nanorem.ru")
+
+        await update.message.reply_text(
+            "https://nanorvs.ru"
+        )
 
 
 def setup_handlers(application):
