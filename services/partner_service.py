@@ -47,6 +47,8 @@ class PartnerService:
             5: 0
         }
 
+        total = 0
+
         for p in partners:
 
             if not p.lineage:
@@ -58,6 +60,9 @@ class PartnerService:
 
                 if level <= 5:
                     levels[level] += 1
+                    total += 1
+
+        levels["total"] = total
 
         return levels
 
@@ -65,7 +70,6 @@ class PartnerService:
 
         session = SessionLocal()
 
-        # Количество партнёров в сети
         partners = session.query(Partner).all()
 
         total_partners = 0
@@ -74,7 +78,6 @@ class PartnerService:
             if p.lineage and partner_id in p.lineage:
                 total_partners += 1
 
-        # Общая сумма комиссий
         total_commission = session.query(
             func.coalesce(func.sum(Commission.amount), 0)
         ).filter(

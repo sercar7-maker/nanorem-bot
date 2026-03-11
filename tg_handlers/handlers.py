@@ -41,12 +41,13 @@ async def button_handler(update, context):
         levels = partner_service.get_network_levels(partner.id)
 
         message = (
-            "Структура вашей сети:\n\n"
+            "👥 Ваша сеть\n\n"
             f"1 уровень — {levels[1]} партнёров\n"
             f"2 уровень — {levels[2]} партнёров\n"
             f"3 уровень — {levels[3]} партнёров\n"
             f"4 уровень — {levels[4]} партнёров\n"
-            f"5 уровень — {levels[5]} партнёров"
+            f"5 уровень — {levels[5]} партнёров\n\n"
+            f"Всего партнёров — {levels['total']}"
         )
 
         await update.message.reply_text(message)
