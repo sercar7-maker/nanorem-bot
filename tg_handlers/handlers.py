@@ -2,6 +2,8 @@ import logging
 from telegram.ext import MessageHandler, filters
 
 from services.partner_service import PartnerService
+from services.network_turnover_service import NetworkTurnoverService
+from database.db import SessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -63,11 +65,21 @@ async def button_handler(update, context):
         stats = partner_service.get_partner_stats(partner.id)
         balance = partner_service.get_partner_balance(partner.id)
 
+        session = SessionLocal()
+        turnover_service = NetworkTurnoverService(session)
+
+        monthly_personal = turnover_service.get_monthly_personal_turnover(partner.id)
+        monthly_network = turnover_service.get_monthly_network_turnover(partner.id)
+
+        session.close()
+
         message = (
             "📊 Ваша статистика\n\n"
             f"Партнёров в сети: {stats['partners']}\n"
             f"Всего комиссий: {stats['commission']:.2f} ₽\n"
-            f"Ваш баланс: {balance:.2f} ₽"
+            f"Ваш баланс: {balance:.2f} ₽\n\n"
+            f"Личный оборот за месяц: {monthly_personal:.2f} ₽\n"
+            f"Оборот сети за месяц: {monthly_network:.2f} ₽"
         )
 
         await update.message.reply_text(message)

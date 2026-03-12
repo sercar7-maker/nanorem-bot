@@ -277,3 +277,4 @@ from database.models_balance import (
     BalanceTransaction,
     BalanceTransactionType,
 )
+from database.models_stats import PartnerStats

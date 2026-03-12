@@ -7,6 +7,7 @@ from core.network import NetworkManager
 from database.db import SessionLocal
 from database.models import Commission
 from services.commission_service import CommissionService
+from services.stats_service import StatsService
 
 logger = logging.getLogger(__name__)
 
@@ -39,10 +40,16 @@ class OrderHandler:
             logger.info(f"Processing order {order_id} for partner {partner_id}")
             logger.info(f"Order data received: {order_data}")
 
+            # -------------------------------------------------
             # Build upline chain
+            # -------------------------------------------------
+
             upline_chain = self.network_manager.get_upline_chain(partner_id)
 
+            # -------------------------------------------------
             # Calculate commissions
+            # -------------------------------------------------
+
             commissions = self.commission_calculator.calculate_purchase_commissions(
                 purchase_amount=amount,
                 buying_partner_id=partner_id,
@@ -51,7 +58,10 @@ class OrderHandler:
 
             logger.info(f"Calculated {len(commissions)} commissions for purchase by {partner_id}")
 
+            # -------------------------------------------------
             # Save commissions
+            # -------------------------------------------------
+
             commission_service = CommissionService(session)
 
             for c in commissions:
@@ -70,10 +80,24 @@ class OrderHandler:
 
                 commission_service.approve_commission(commission)
 
+            # -------------------------------------------------
+            # Update turnover statistics
+            # -------------------------------------------------
+
+            stats_service = StatsService(session)
+
+            stats_service.process_purchase(
+                partner_id=partner_id,
+                amount=float(amount)
+            )
+
             session.commit()
             session.close()
 
+            # -------------------------------------------------
             # Report sale to external API
+            # -------------------------------------------------
+
             self.api_client.update_partner_sales(
                 partner_id,
                 {
