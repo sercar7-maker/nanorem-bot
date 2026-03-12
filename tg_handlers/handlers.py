@@ -1,9 +1,11 @@
 import logging
+
 from telegram.ext import MessageHandler, filters
 
 from services.partner_service import PartnerService
-from services.network_turnover_service import NetworkTurnoverService
 from database.db import SessionLocal
+from services.network_tree_service import NetworkTreeService
+from services.network_turnover_service import NetworkTurnoverService
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +25,10 @@ async def button_handler(update, context):
         )
         return
 
+    # -------------------------------------------------
+    # Баланс
+    # -------------------------------------------------
+
     if text == "💰 Баланс":
 
         balance = partner_service.get_partner_balance(partner.id)
@@ -31,6 +37,10 @@ async def button_handler(update, context):
             f"Ваш баланс: {balance:.2f} ₽"
         )
 
+    # -------------------------------------------------
+    # Профиль
+    # -------------------------------------------------
+
     elif text == "👤 Профиль":
 
         await update.message.reply_text(
@@ -38,21 +48,43 @@ async def button_handler(update, context):
             f"Дата регистрации: {partner.registration_date}"
         )
 
+    # -------------------------------------------------
+    # Моя сеть
+    # -------------------------------------------------
+
     elif text == "👥 Моя сеть":
 
-        levels = partner_service.get_network_levels(partner.id)
+        session = SessionLocal()
 
-        message = (
-            "👥 Ваша сеть\n\n"
-            f"1 уровень — {levels[1]} партнёров\n"
-            f"2 уровень — {levels[2]} партнёров\n"
-            f"3 уровень — {levels[3]} партнёров\n"
-            f"4 уровень — {levels[4]} партнёров\n"
-            f"5 уровень — {levels[5]} партнёров\n\n"
-            f"Всего партнёров — {levels['total']}"
-        )
+        tree_service = NetworkTreeService(session)
+
+        partners = tree_service.get_direct_partners(partner.id)
+
+        session.close()
+
+        if not partners:
+
+            await update.message.reply_text(
+                "У вас пока нет партнёров."
+            )
+            return
+
+        message = "👥 Ваши партнёры (1 уровень)\n\n"
+
+        for p in partners:
+
+            name = p["first_name"] or "Без имени"
+
+            if p["username"]:
+                name += f" (@{p['username']})"
+
+            message += f"• {name}\n"
 
         await update.message.reply_text(message)
+
+    # -------------------------------------------------
+    # Реферальная ссылка
+    # -------------------------------------------------
 
     elif text == "🔗 Реферальная ссылка":
 
@@ -60,12 +92,18 @@ async def button_handler(update, context):
             f"https://t.me/nanorem_bot?start={partner.telegram_link_code}"
         )
 
+    # -------------------------------------------------
+    # Статистика
+    # -------------------------------------------------
+
     elif text == "📊 Статистика":
 
         stats = partner_service.get_partner_stats(partner.id)
+
         balance = partner_service.get_partner_balance(partner.id)
 
         session = SessionLocal()
+
         turnover_service = NetworkTurnoverService(session)
 
         monthly_personal = turnover_service.get_monthly_personal_turnover(partner.id)
@@ -83,6 +121,10 @@ async def button_handler(update, context):
         )
 
         await update.message.reply_text(message)
+
+    # -------------------------------------------------
+    # Сайт
+    # -------------------------------------------------
 
     elif text == "🌐 Сайт":
 
