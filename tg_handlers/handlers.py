@@ -6,6 +6,7 @@ from services.partner_service import PartnerService
 from database.db import SessionLocal
 from services.network_tree_service import NetworkTreeService
 from services.network_turnover_service import NetworkTurnoverService
+from services.rank_service import RankService
 
 logger = logging.getLogger(__name__)
 
@@ -38,14 +39,22 @@ async def button_handler(update, context):
         )
 
     # -------------------------------------------------
-    # Профиль
+    # Профиль + Ранг
     # -------------------------------------------------
 
     elif text == "👤 Профиль":
 
+        session = SessionLocal()
+
+        rank_service = RankService(session)
+        rank = rank_service.calculate_rank(partner.id)
+
+        session.close()
+
         await update.message.reply_text(
             f"Партнёр ID: {partner.id}\n"
-            f"Дата регистрации: {partner.registration_date}"
+            f"Дата регистрации: {partner.registration_date}\n"
+            f"Ранг: {rank}"
         )
 
     # -------------------------------------------------
