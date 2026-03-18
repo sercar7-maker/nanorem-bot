@@ -5,7 +5,7 @@ from core.commission import CommissionCalculator
 from core.network import NetworkManager
 
 from database.db import SessionLocal
-from database.models import Commission
+from database.models import Commission, Purchase, Partner
 from services.commission_service import CommissionService
 from services.stats_service import StatsService
 from services.rank_service import RankService
@@ -26,15 +26,33 @@ class OrderHandler:
 
         logger.info("Initialized OrderHandler")
 
-    def process_order(self, order_data: dict):
+    async def process_order(self, order_data: dict):
 
         try:
 
             order_id = order_data["id"]
             partner_id = order_data["partner_id"]
-            amount = order_data["total_amount"]
+            amount = float(order_data["total_amount"])
 
             session = SessionLocal()
+
+            # -------------------------------------------------
+            # CREATE OR GET PURCHASE
+            # -------------------------------------------------
+
+            purchase = session.query(Purchase).filter_by(ext_ref=str(order_id)).first()
+
+            if not purchase:
+                purchase = Purchase(
+                    purchase_number=str(order_id),
+                    partner_id=partner_id,
+                    amount=amount,
+                    status="paid",
+                    ext_ref=str(order_id)
+                )
+                session.add(purchase)
+                session.commit()
+                session.refresh(purchase)
 
             # -------------------------------------------------
             # OLD RANK
@@ -44,47 +62,10 @@ class OrderHandler:
             old_rank = rank_service.calculate_rank(partner_id)
 
             # -------------------------------------------------
-
-            existing = session.query(Commission).filter_by(purchase_id=order_id).first()
-            if existing:
-                logger.warning(f"Order {order_id} already processed")
-                session.close()
-                return True
-
-            logger.info(f"Processing order {order_id} for partner {partner_id}")
-
-            # -------------------------------------------------
-            # Upline
+            # PROCESS COMMISSIONS (НОВАЯ ЛОГИКА)
             # -------------------------------------------------
 
-            upline_chain = self.network_manager.get_upline_chain(partner_id)
-
-            # -------------------------------------------------
-            # Commissions
-            # -------------------------------------------------
-
-            commissions = self.commission_calculator.calculate_purchase_commissions(
-                purchase_amount=amount,
-                buying_partner_id=partner_id,
-                upline_chain=upline_chain
-            )
-
-            commission_service = CommissionService(session)
-
-            for c in commissions:
-
-                commission = Commission(
-                    partner_id=c.partner_id,
-                    purchase_id=order_id,
-                    source_partner_id=partner_id,
-                    level=c.level,
-                    rate=c.rate,
-                    base_amount=amount,
-                    amount=c.amount
-                )
-
-                session.add(commission)
-                commission_service.approve_commission(commission)
+            await self.commission_calculator.process_purchase(purchase)
 
             # -------------------------------------------------
             # Stats update
@@ -94,7 +75,7 @@ class OrderHandler:
 
             stats_service.process_purchase(
                 partner_id=partner_id,
-                amount=float(amount)
+                amount=amount
             )
 
             session.commit()
@@ -106,21 +87,18 @@ class OrderHandler:
             new_rank = rank_service.calculate_rank(partner_id)
 
             # -------------------------------------------------
-            # Notify if upgraded
+            # Notify if upgraded (FIX ASYNC)
             # -------------------------------------------------
 
             if new_rank != old_rank:
 
                 logger.info(f"Partner {partner_id} rank upgraded: {old_rank} → {new_rank}")
 
-                from database.models import Partner
-
                 partner = session.query(Partner).filter(Partner.id == partner_id).first()
 
                 if partner and partner.telegram_id:
-
                     try:
-                        self.bot.send_message(
+                        await self.bot.send_message(
                             chat_id=partner.telegram_id,
                             text=(
                                 "🎉 Поздравляем!\n\n"
@@ -141,7 +119,7 @@ class OrderHandler:
                 partner_id,
                 {
                     "order_id": order_id,
-                    "amount": float(amount),
+                    "amount": amount,
                 }
             )
 

@@ -1,14 +1,11 @@
 import logging
 from dataclasses import dataclass
-from typing import List, Tuple
-
-logger = logging.getLogger(__name__)
-
-
-from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Tuple
-import logging
+
+from database.models import Commission, Purchase, Partner
+from telegram import Bot
+from config import BOT_TOKEN
 
 logger = logging.getLogger(__name__)
 
@@ -26,17 +23,20 @@ class CommissionResult:
 
 class CommissionCalculator:
     """
-    Simple MLM commission calculator.
+    MLM commission calculator + запись в БД + уведомления
     """
 
-    # проценты по уровням
     LEVEL_RATES = [
-        Decimal("0.20"),  # 1 линия
-        Decimal("0.10"),  # 2 линия
-        Decimal("0.05"),  # 3 линия
-        Decimal("0.05"),  # 4 линия
-        Decimal("0.05"),  # 5 линия
+        Decimal("0.20"),
+        Decimal("0.10"),
+        Decimal("0.05"),
+        Decimal("0.05"),
+        Decimal("0.05"),
     ]
+
+    def __init__(self, db):
+        self.db = db
+        self.bot = Bot(token=BOT_TOKEN)
 
     def calculate_purchase_commissions(
         self,
@@ -44,10 +44,6 @@ class CommissionCalculator:
         buying_partner_id: int,
         upline_chain: List[Tuple[int, bool]]
     ) -> List[CommissionResult]:
-        """
-        Calculate MLM commissions for purchase.
-        upline_chain = [(partner_id, is_active)]
-        """
 
         commissions: List[CommissionResult] = []
 
@@ -86,8 +82,79 @@ class CommissionCalculator:
                 )
             )
 
-        logger.info(
-            f"Calculated {len(commissions)} commissions for purchase by {buying_partner_id}"
+        return commissions
+
+    async def process_purchase(self, purchase: Purchase):
+
+        if purchase.is_commission_processed:
+            return
+
+        partner = (
+            self.db.query(Partner)
+            .filter(Partner.id == purchase.partner_id)
+            .first()
         )
 
-        return commissions
+        if not partner:
+            return
+
+        lineage = partner.lineage or []
+        upline_chain = [(pid, True) for pid in reversed(lineage)]
+
+        results = self.calculate_purchase_commissions(
+            purchase_amount=Decimal(str(purchase.amount)),
+            buying_partner_id=partner.id,
+            upline_chain=upline_chain
+        )
+
+        for res in results:
+
+            commission = Commission(
+                partner_id=res.partner_id,
+                purchase_id=purchase.id,
+                source_partner_id=partner.id,
+                level=res.level,
+                rate=float(res.rate),
+                base_amount=float(res.base_amount),
+                amount=float(res.amount),
+                is_compressed=res.compressed,
+                notes=res.notes,
+            )
+
+            self.db.add(commission)
+
+            # 🔔 УВЕДОМЛЕНИЕ
+            if res.amount > 0:
+                await self.send_commission_notification(
+                    partner_id=res.partner_id,
+                    amount=res.amount,
+                    level=res.level
+                )
+
+        purchase.is_commission_processed = True
+
+        self.db.commit()
+
+    async def send_commission_notification(self, partner_id: int, amount: Decimal, level: int):
+
+        partner = (
+            self.db.query(Partner)
+            .filter(Partner.id == partner_id)
+            .first()
+        )
+
+        if not partner or not partner.telegram_id:
+            return
+
+        try:
+            await self.bot.send_message(
+                chat_id=partner.telegram_id,
+                text=(
+                    f"💰 Вам начислена комиссия!\n\n"
+                    f"Сумма: {amount} ₽\n"
+                    f"Уровень: {level}\n\n"
+                    f"Продолжайте развивать сеть 🚀"
+                )
+            )
+        except Exception as e:
+            logger.error(f"Telegram notify error: {e}")

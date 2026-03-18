@@ -46,6 +46,10 @@ class WithdrawalStatus(enum.Enum):
     REJECTED = "rejected"
 
 
+# =========================
+# PARTNER
+# =========================
+
 class Partner(Base):
     __tablename__ = "partners"
 
@@ -80,6 +84,9 @@ class Partner(Base):
 
     role = Column(String, default=PartnerRole.PARTNER.value)
 
+    # 🔥 ДОБАВИЛИ РАНГ (если ещё нет)
+    rank = Column(String, default="Silver")
+
     upline = relationship("Partner", remote_side=[id], backref="downline")
 
     purchases = relationship("Purchase", back_populates="partner")
@@ -107,6 +114,10 @@ class Partner(Base):
     )
 
 
+# =========================
+# PURCHASE = ORDER
+# =========================
+
 class Purchase(Base):
     __tablename__ = "purchases"
 
@@ -130,11 +141,14 @@ class Purchase(Base):
         default=OrderStatus.PENDING,
     )
 
-    ext_ref = Column(String(100))
+    ext_ref = Column(String(100))  # id заказа с сайта
 
     created_at = Column(DateTime, default=datetime.utcnow)
 
     paid_at = Column(DateTime)
+
+    # 🔥 ДОБАВИЛИ ФЛАГ (важно для защиты от дублей)
+    is_commission_processed = Column(Boolean, default=False)
 
     partner = relationship(
         "Partner",
@@ -146,6 +160,10 @@ class Purchase(Base):
         back_populates="purchase",
     )
 
+
+# =========================
+# COMMISSION
+# =========================
 
 class Commission(Base):
     __tablename__ = "commissions"
@@ -213,6 +231,10 @@ class Commission(Base):
     )
 
 
+# =========================
+# CONSENT
+# =========================
+
 class ConsentVersion(Base):
     __tablename__ = "consent_versions"
 
@@ -234,6 +256,10 @@ class ConsentVersion(Base):
         nullable=False,
     )
 
+
+# =========================
+# WITHDRAWAL
+# =========================
 
 class Withdrawal(Base):
     __tablename__ = "withdrawals"
@@ -270,6 +296,10 @@ class Withdrawal(Base):
     )
 
 
+# =========================
+# IMPORTS
+# =========================
+
 from .user_models import User
 
 from database.models_balance import (
@@ -277,4 +307,5 @@ from database.models_balance import (
     BalanceTransaction,
     BalanceTransactionType,
 )
+
 from database.models_stats import PartnerStats
