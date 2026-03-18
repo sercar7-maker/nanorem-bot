@@ -5,8 +5,7 @@ from core.commission import CommissionCalculator
 from core.network import NetworkManager
 
 from database.db import SessionLocal
-from database.models import Commission, Purchase, Partner
-from services.commission_service import CommissionService
+from database.models import Purchase, Partner
 from services.stats_service import StatsService
 from services.rank_service import RankService
 
@@ -55,20 +54,13 @@ class OrderHandler:
                 session.refresh(purchase)
 
             # -------------------------------------------------
-            # OLD RANK
-            # -------------------------------------------------
-
-            rank_service = RankService(session)
-            old_rank = rank_service.calculate_rank(partner_id)
-
-            # -------------------------------------------------
-            # PROCESS COMMISSIONS (НОВАЯ ЛОГИКА)
+            # PROCESS COMMISSIONS
             # -------------------------------------------------
 
             await self.commission_calculator.process_purchase(purchase)
 
             # -------------------------------------------------
-            # Stats update
+            # STATS UPDATE
             # -------------------------------------------------
 
             stats_service = StatsService(session)
@@ -78,36 +70,15 @@ class OrderHandler:
                 amount=amount
             )
 
-            session.commit()
-
             # -------------------------------------------------
-            # NEW RANK
+            # RANK UPDATE (НОВАЯ ЛОГИКА)
             # -------------------------------------------------
 
-            new_rank = rank_service.calculate_rank(partner_id)
+            partner = session.query(Partner).filter(Partner.id == partner_id).first()
 
-            # -------------------------------------------------
-            # Notify if upgraded (FIX ASYNC)
-            # -------------------------------------------------
-
-            if new_rank != old_rank:
-
-                logger.info(f"Partner {partner_id} rank upgraded: {old_rank} → {new_rank}")
-
-                partner = session.query(Partner).filter(Partner.id == partner_id).first()
-
-                if partner and partner.telegram_id:
-                    try:
-                        await self.bot.send_message(
-                            chat_id=partner.telegram_id,
-                            text=(
-                                "🎉 Поздравляем!\n\n"
-                                f"Вы достигли ранга: {new_rank}\n\n"
-                                "Продолжайте развитие сети 🚀"
-                            )
-                        )
-                    except Exception as e:
-                        logger.error(f"Telegram notify error: {e}")
+            if partner:
+                rank_service = RankService(session)
+                await rank_service.process_rank(partner)
 
             session.close()
 

@@ -4,8 +4,6 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Tuple
 
 from database.models import Commission, Purchase, Partner
-from telegram import Bot
-from config import BOT_TOKEN
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +21,7 @@ class CommissionResult:
 
 class CommissionCalculator:
     """
-    MLM commission calculator + запись в БД + уведомления
+    MLM commission calculator (БЕЗ Telegram — чтобы не было timeout)
     """
 
     LEVEL_RATES = [
@@ -36,7 +34,6 @@ class CommissionCalculator:
 
     def __init__(self, db):
         self.db = db
-        self.bot = Bot(token=BOT_TOKEN)
 
     def calculate_purchase_commissions(
         self,
@@ -123,38 +120,6 @@ class CommissionCalculator:
 
             self.db.add(commission)
 
-            # 🔔 УВЕДОМЛЕНИЕ
-            if res.amount > 0:
-                await self.send_commission_notification(
-                    partner_id=res.partner_id,
-                    amount=res.amount,
-                    level=res.level
-                )
-
         purchase.is_commission_processed = True
 
         self.db.commit()
-
-    async def send_commission_notification(self, partner_id: int, amount: Decimal, level: int):
-
-        partner = (
-            self.db.query(Partner)
-            .filter(Partner.id == partner_id)
-            .first()
-        )
-
-        if not partner or not partner.telegram_id:
-            return
-
-        try:
-            await self.bot.send_message(
-                chat_id=partner.telegram_id,
-                text=(
-                    f"💰 Вам начислена комиссия!\n\n"
-                    f"Сумма: {amount} ₽\n"
-                    f"Уровень: {level}\n\n"
-                    f"Продолжайте развивать сеть 🚀"
-                )
-            )
-        except Exception as e:
-            logger.error(f"Telegram notify error: {e}")

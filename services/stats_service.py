@@ -19,7 +19,13 @@ class StatsService:
         )
 
         if not stats:
-            stats = PartnerStats(partner_id=partner_id)
+            stats = PartnerStats(
+                partner_id=partner_id,
+                personal_turnover=0,
+                network_turnover=0,
+                monthly_personal_turnover=0,
+                monthly_network_turnover=0,
+            )
             self.session.add(stats)
             self.session.flush()
 
@@ -50,11 +56,23 @@ class StatsService:
         if not partner:
             return
 
-        # личный оборот
+        # -------------------------------------------------
+        # ЛИЧНЫЙ ОБОРОТ
+        # -------------------------------------------------
+
         self.add_personal_turnover(partner_id, amount)
 
-        # оборот сети для аплайнов
+        # -------------------------------------------------
+        # СЕТЕВОЙ ОБОРОТ (через lineage)
+        # -------------------------------------------------
+
         lineage = partner.lineage or []
 
         for upline_id in lineage:
             self.add_network_turnover(upline_id, amount)
+
+        # -------------------------------------------------
+        # ✅ ФИКСИРУЕМ В БД
+        # -------------------------------------------------
+
+        self.session.commit()

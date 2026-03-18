@@ -1,13 +1,81 @@
 import logging
-from telegram.ext import MessageHandler, filters
+from telegram.ext import MessageHandler, CommandHandler, filters
 
 from services.partner_service import PartnerService
 from services.rank_service import RankService
+from services.stats_service import StatsService
+from core.commission import CommissionCalculator
 
 from database.db import SessionLocal
+from database.models import Partner, Purchase
 
 logger = logging.getLogger(__name__)
 
+
+# -------------------------------------------------
+# TEST ORDER (🔥 главный тест системы)
+# -------------------------------------------------
+
+async def test_order(update, context):
+
+    print("TEST ORDER CALLED")
+
+    await update.message.reply_text("⏳ Обрабатываю заказ...")
+
+    session = SessionLocal()
+    telegram_id = str(update.effective_user.id)
+
+    partner = (
+        session.query(Partner)
+        .filter(Partner.telegram_id == telegram_id)
+        .first()
+    )
+
+    if not partner:
+        print("PARTNER NOT FOUND")
+        await update.message.reply_text("❌ Вы не зарегистрированы")
+        session.close()
+        return
+
+    try:
+        # создаём тестовый заказ
+        purchase = Purchase(
+            purchase_number="TEST123",
+            partner_id=partner.id,
+            amount=1000,
+            status="paid",
+            ext_ref="TEST123"
+        )
+
+        session.add(purchase)
+        session.commit()
+        session.refresh(purchase)
+
+        # комиссии
+        calculator = CommissionCalculator(session)
+        await calculator.process_purchase(purchase)
+
+        # статистика
+        stats_service = StatsService(session)
+        stats_service.process_purchase(partner.id, 1000)
+
+        # ранги
+        rank_service = RankService(session)
+        await rank_service.process_rank(partner)
+
+        await update.message.reply_text("✅ Тестовый заказ обработан")
+
+    except Exception as e:
+        print(f"TEST ORDER ERROR: {e}")
+        await update.message.reply_text(f"❌ Ошибка: {e}")
+
+    finally:
+        session.close()
+
+
+# -------------------------------------------------
+# BUTTON HANDLER
+# -------------------------------------------------
 
 async def button_handler(update, context):
 
@@ -41,13 +109,10 @@ async def button_handler(update, context):
     # -------------------------------------------------
     elif text == "👤 Профиль":
 
-        rank_service = RankService(session)
-        rank = rank_service.calculate_rank(partner.id)
-
         await update.message.reply_text(
             f"Партнёр ID: {partner.id}\n"
             f"Дата регистрации: {partner.registration_date}\n"
-            f"Ранг: {rank}"
+            f"Ранг: {partner.rank}"
         )
 
     # -------------------------------------------------
@@ -109,6 +174,10 @@ async def button_handler(update, context):
     session.close()
 
 
+# -------------------------------------------------
+# SETUP
+# -------------------------------------------------
+
 def setup_handlers(application):
 
     logger.info("Registering Telegram handlers")
@@ -118,6 +187,8 @@ def setup_handlers(application):
 
     application.add_handler(start_handler())
     application.add_handler(balance_handler())
+
+    application.add_handler(CommandHandler("test_order", test_order))
 
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, button_handler)
