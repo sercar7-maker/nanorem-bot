@@ -8,6 +8,10 @@ from database.db import SessionLocal
 from database.models import Commission
 from services.commission_service import CommissionService
 from services.stats_service import StatsService
+from services.rank_service import RankService
+
+from telegram import Bot
+from config import BOT_TOKEN
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +22,7 @@ class OrderHandler:
         self.api_client = api_client
         self.commission_calculator = commission_calculator
         self.network_manager = NetworkManager()
+        self.bot = Bot(token=BOT_TOKEN)
 
         logger.info("Initialized OrderHandler")
 
@@ -31,6 +36,15 @@ class OrderHandler:
 
             session = SessionLocal()
 
+            # -------------------------------------------------
+            # OLD RANK
+            # -------------------------------------------------
+
+            rank_service = RankService(session)
+            old_rank = rank_service.calculate_rank(partner_id)
+
+            # -------------------------------------------------
+
             existing = session.query(Commission).filter_by(purchase_id=order_id).first()
             if existing:
                 logger.warning(f"Order {order_id} already processed")
@@ -38,16 +52,15 @@ class OrderHandler:
                 return True
 
             logger.info(f"Processing order {order_id} for partner {partner_id}")
-            logger.info(f"Order data received: {order_data}")
 
             # -------------------------------------------------
-            # Build upline chain
+            # Upline
             # -------------------------------------------------
 
             upline_chain = self.network_manager.get_upline_chain(partner_id)
 
             # -------------------------------------------------
-            # Calculate commissions
+            # Commissions
             # -------------------------------------------------
 
             commissions = self.commission_calculator.calculate_purchase_commissions(
@@ -55,12 +68,6 @@ class OrderHandler:
                 buying_partner_id=partner_id,
                 upline_chain=upline_chain
             )
-
-            logger.info(f"Calculated {len(commissions)} commissions for purchase by {partner_id}")
-
-            # -------------------------------------------------
-            # Save commissions
-            # -------------------------------------------------
 
             commission_service = CommissionService(session)
 
@@ -77,11 +84,10 @@ class OrderHandler:
                 )
 
                 session.add(commission)
-
                 commission_service.approve_commission(commission)
 
             # -------------------------------------------------
-            # Update turnover statistics
+            # Stats update
             # -------------------------------------------------
 
             stats_service = StatsService(session)
@@ -92,10 +98,43 @@ class OrderHandler:
             )
 
             session.commit()
+
+            # -------------------------------------------------
+            # NEW RANK
+            # -------------------------------------------------
+
+            new_rank = rank_service.calculate_rank(partner_id)
+
+            # -------------------------------------------------
+            # Notify if upgraded
+            # -------------------------------------------------
+
+            if new_rank != old_rank:
+
+                logger.info(f"Partner {partner_id} rank upgraded: {old_rank} → {new_rank}")
+
+                from database.models import Partner
+
+                partner = session.query(Partner).filter(Partner.id == partner_id).first()
+
+                if partner and partner.telegram_id:
+
+                    try:
+                        self.bot.send_message(
+                            chat_id=partner.telegram_id,
+                            text=(
+                                "🎉 Поздравляем!\n\n"
+                                f"Вы достигли ранга: {new_rank}\n\n"
+                                "Продолжайте развитие сети 🚀"
+                            )
+                        )
+                    except Exception as e:
+                        logger.error(f"Telegram notify error: {e}")
+
             session.close()
 
             # -------------------------------------------------
-            # Report sale to external API
+            # External API
             # -------------------------------------------------
 
             self.api_client.update_partner_sales(
@@ -103,15 +142,6 @@ class OrderHandler:
                 {
                     "order_id": order_id,
                     "amount": float(amount),
-                    "commissions": [
-                        {
-                            "partner_id": c.partner_id,
-                            "level": c.level,
-                            "rate": float(c.rate),
-                            "amount": float(c.amount)
-                        }
-                        for c in commissions
-                    ]
                 }
             )
 

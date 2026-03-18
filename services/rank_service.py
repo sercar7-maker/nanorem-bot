@@ -1,40 +1,49 @@
-from sqlalchemy.orm import Session
-
-from database.models_stats import PartnerStats
+from database.models import Partner
+from services.stats_service import StatsService
 
 
 class RankService:
 
     RANKS = [
-        ("Diamond", 500_000),
-        ("Platinum", 100_000),
-        ("Gold", 50_000),
-        ("Silver", 10_000),
         ("Partner", 0),
+        ("Silver", 10000),
+        ("Gold", 50000),
+        ("Platinum", 100000),
     ]
 
-    def __init__(self, session: Session):
-        self.session = session
+    @staticmethod
+    def calculate_rank(personal_turnover: float) -> str:
 
-    # -------------------------------------------------
-    # Get rank by turnover
-    # -------------------------------------------------
+        current_rank = "Partner"
 
-    def calculate_rank(self, partner_id: int) -> str:
+        for rank, threshold in RankService.RANKS:
+            if personal_turnover >= threshold:
+                current_rank = rank
 
-        stats = (
-            self.session.query(PartnerStats)
-            .filter(PartnerStats.partner_id == partner_id)
-            .first()
+        return current_rank
+
+    @staticmethod
+    def update_partner_rank(session, partner, new_rank: str):
+
+        if partner.rank != new_rank:
+            old_rank = partner.rank
+            partner.rank = new_rank
+            session.commit()
+            return old_rank, new_rank
+
+        return None, None
+
+    @staticmethod
+    def process_rank(session, partner):
+
+        stats_service = StatsService(session)
+
+        stats = stats_service.get_or_create_stats(partner.id)
+
+        new_rank = RankService.calculate_rank(stats.personal_turnover)
+
+        old_rank, updated_rank = RankService.update_partner_rank(
+            session, partner, new_rank
         )
 
-        if not stats:
-            return "Partner"
-
-        turnover = stats.network_turnover or 0
-
-        for rank_name, required_turnover in self.RANKS:
-            if turnover >= required_turnover:
-                return rank_name
-
-        return "Partner"
+        return old_rank, updated_rank

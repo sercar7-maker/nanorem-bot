@@ -1,12 +1,10 @@
 import logging
-
 from telegram.ext import MessageHandler, filters
 
 from services.partner_service import PartnerService
-from database.db import SessionLocal
-from services.network_tree_service import NetworkTreeService
-from services.network_turnover_service import NetworkTurnoverService
 from services.rank_service import RankService
+
+from database.db import SessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +15,7 @@ async def button_handler(update, context):
     telegram_id = str(update.effective_user.id)
 
     partner_service = PartnerService()
+    session = SessionLocal()
 
     partner = partner_service.get_partner_by_telegram_id(telegram_id)
 
@@ -29,7 +28,6 @@ async def button_handler(update, context):
     # -------------------------------------------------
     # Баланс
     # -------------------------------------------------
-
     if text == "💰 Баланс":
 
         balance = partner_service.get_partner_balance(partner.id)
@@ -39,17 +37,12 @@ async def button_handler(update, context):
         )
 
     # -------------------------------------------------
-    # Профиль + Ранг
+    # Профиль
     # -------------------------------------------------
-
     elif text == "👤 Профиль":
-
-        session = SessionLocal()
 
         rank_service = RankService(session)
         rank = rank_service.calculate_rank(partner.id)
-
-        session.close()
 
         await update.message.reply_text(
             f"Партнёр ID: {partner.id}\n"
@@ -58,43 +51,27 @@ async def button_handler(update, context):
         )
 
     # -------------------------------------------------
-    # Моя сеть
+    # Сеть
     # -------------------------------------------------
-
     elif text == "👥 Моя сеть":
 
-        session = SessionLocal()
+        levels = partner_service.get_network_levels(partner.id)
 
-        tree_service = NetworkTreeService(session)
-
-        partners = tree_service.get_direct_partners(partner.id)
-
-        session.close()
-
-        if not partners:
-
-            await update.message.reply_text(
-                "У вас пока нет партнёров."
-            )
-            return
-
-        message = "👥 Ваши партнёры (1 уровень)\n\n"
-
-        for p in partners:
-
-            name = p["first_name"] or "Без имени"
-
-            if p["username"]:
-                name += f" (@{p['username']})"
-
-            message += f"• {name}\n"
+        message = (
+            "👥 Ваша сеть\n\n"
+            f"1 уровень — {levels[1]} партнёров\n"
+            f"2 уровень — {levels[2]} партнёров\n"
+            f"3 уровень — {levels[3]} партнёров\n"
+            f"4 уровень — {levels[4]} партнёров\n"
+            f"5 уровень — {levels[5]} партнёров\n\n"
+            f"Всего партнёров — {levels['total']}"
+        )
 
         await update.message.reply_text(message)
 
     # -------------------------------------------------
     # Реферальная ссылка
     # -------------------------------------------------
-
     elif text == "🔗 Реферальная ссылка":
 
         await update.message.reply_text(
@@ -104,29 +81,18 @@ async def button_handler(update, context):
     # -------------------------------------------------
     # Статистика
     # -------------------------------------------------
-
     elif text == "📊 Статистика":
 
         stats = partner_service.get_partner_stats(partner.id)
-
         balance = partner_service.get_partner_balance(partner.id)
-
-        session = SessionLocal()
-
-        turnover_service = NetworkTurnoverService(session)
-
-        monthly_personal = turnover_service.get_monthly_personal_turnover(partner.id)
-        monthly_network = turnover_service.get_monthly_network_turnover(partner.id)
-
-        session.close()
 
         message = (
             "📊 Ваша статистика\n\n"
             f"Партнёров в сети: {stats['partners']}\n"
             f"Всего комиссий: {stats['commission']:.2f} ₽\n"
             f"Ваш баланс: {balance:.2f} ₽\n\n"
-            f"Личный оборот за месяц: {monthly_personal:.2f} ₽\n"
-            f"Оборот сети за месяц: {monthly_network:.2f} ₽"
+            f"Личный оборот за месяц: {stats['personal_turnover']:.2f} ₽\n"
+            f"Оборот сети за месяц: {stats['network_turnover']:.2f} ₽"
         )
 
         await update.message.reply_text(message)
@@ -134,12 +100,13 @@ async def button_handler(update, context):
     # -------------------------------------------------
     # Сайт
     # -------------------------------------------------
-
     elif text == "🌐 Сайт":
 
         await update.message.reply_text(
             "https://nanorvs.ru"
         )
+
+    session.close()
 
 
 def setup_handlers(application):
