@@ -4,6 +4,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Tuple
 
 from database.models import Commission, Purchase, Partner
+from tg_handlers.notifications import notify_commission
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,7 @@ class CommissionResult:
 
 class CommissionCalculator:
     """
-    MLM commission calculator (БЕЗ Telegram — чтобы не было timeout)
+    MLM commission calculator + уведомления (БЕЗ таймаутов)
     """
 
     LEVEL_RATES = [
@@ -119,6 +120,29 @@ class CommissionCalculator:
             )
 
             self.db.add(commission)
+
+            # -------------------------------------------------
+            # 🔔 УВЕДОМЛЕНИЕ (правильно, безопасно)
+            # -------------------------------------------------
+            if res.amount > 0:
+
+                upline_partner = (
+                    self.db.query(Partner)
+                    .filter(Partner.id == res.partner_id)
+                    .first()
+                )
+
+                if upline_partner and upline_partner.telegram_id:
+
+                    try:
+                        await notify_commission(
+                            partner_telegram_id=int(upline_partner.telegram_id),
+                            amount=float(res.amount),
+                            level=res.level,
+                            buyer_name=partner.first_name or "партнёр"
+                        )
+                    except Exception as e:
+                        logger.error(f"Notify failed: {e}")
 
         purchase.is_commission_processed = True
 

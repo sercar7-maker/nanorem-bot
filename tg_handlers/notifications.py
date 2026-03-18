@@ -1,55 +1,92 @@
 """Telegram notification helpers for NANOREM MLM Bot."""
+
 import logging
 from telegram import Bot
 from telegram.error import TelegramError
+
 from database.db import get_session
-from database.models import Partner, Commission
+from database.models import Partner
 from config import BOT_TOKEN
 
 logger = logging.getLogger(__name__)
 
+# 🔥 создаём ОДИН bot (важно!)
+bot = Bot(token=BOT_TOKEN)
+
+
+# -------------------------------------------------
+# Комиссия
+# -------------------------------------------------
 
 async def notify_commission(partner_telegram_id: int, amount: float, level: int, buyer_name: str) -> None:
-    """Send a commission notification to a partner."""
-    if not partner_telegram_id or not BOT_TOKEN:
+
+    if not partner_telegram_id:
         return
 
     msg = (
-        f"💵 Новое начисление!\n"
-        f"Уровень: *{level}*\n"
-        f"Сумма: *+{amount:.2f}* руб.\n"
-        f"От: закупки партнёра {buyer_name}"
+        f"💵 Новое начисление!\n\n"
+        f"Уровень: {level}\n"
+        f"Сумма: +{amount:.2f} руб.\n"
+        f"От: {buyer_name}"
     )
 
     try:
-        bot = Bot(token=BOT_TOKEN)
         await bot.send_message(
             chat_id=partner_telegram_id,
-            text=msg,
-            parse_mode='Markdown'
+            text=msg
         )
-        logger.info(f"Commission notification sent to {partner_telegram_id}: +{amount:.2f} rub (level {level})")
-    except TelegramError as e:
-        logger.warning(f"Failed to notify {partner_telegram_id}: {e}")
+        logger.info(f"Commission sent → {partner_telegram_id}")
 
+    except TelegramError as e:
+        logger.warning(f"Notify error: {e}")
+
+
+# -------------------------------------------------
+# Новый партнёр
+# -------------------------------------------------
 
 async def notify_new_referral(upline_telegram_id: int, new_partner_name: str) -> None:
-    """Notify an upline partner that a new partner registered via their link."""
-    if not upline_telegram_id or not BOT_TOKEN:
+
+    if not upline_telegram_id:
         return
 
     msg = (
-        f"🎉 Новый партнёр!\n"
-        f"По вашей ссылке зарегистрировался: *{new_partner_name}*"
+        f"🎉 Новый партнёр!\n\n"
+        f"{new_partner_name} зарегистрировался по вашей ссылке"
     )
 
     try:
-        bot = Bot(token=BOT_TOKEN)
         await bot.send_message(
             chat_id=upline_telegram_id,
-            text=msg,
-            parse_mode='Markdown'
+            text=msg
         )
-        logger.info(f"New referral notification sent to {upline_telegram_id}")
+        logger.info(f"Referral notify → {upline_telegram_id}")
+
     except TelegramError as e:
-        logger.warning(f"Failed to notify {upline_telegram_id}: {e}")
+        logger.warning(f"Notify error: {e}")
+
+
+# -------------------------------------------------
+# Повышение ранга
+# -------------------------------------------------
+
+async def notify_rank_up(partner_telegram_id: int, new_rank: str) -> None:
+
+    if not partner_telegram_id:
+        return
+
+    msg = (
+        f"🎉 Поздравляем!\n\n"
+        f"Ваш новый ранг: {new_rank}\n\n"
+        f"Так держать 🚀"
+    )
+
+    try:
+        await bot.send_message(
+            chat_id=partner_telegram_id,
+            text=msg
+        )
+        logger.info(f"Rank notify → {partner_telegram_id}")
+
+    except TelegramError as e:
+        logger.warning(f"Notify error: {e}")

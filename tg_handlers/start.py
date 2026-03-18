@@ -15,45 +15,52 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = user.username
     first_name = user.first_name
 
-    code = None
-    if context.args:
-        code = context.args[0]
+    code = context.args[0] if context.args else None
 
     session = SessionLocal()
 
-    # попытка привязки по реферальному коду
-    if code:
+    # -------------------------------------------------
+    # ПРОВЕРЯЕМ: УЖЕ ПРИВЯЗАН?
+    # -------------------------------------------------
 
-        partner = session.query(Partner).filter(
-            Partner.telegram_link_code == code
-        ).first()
+    partner = session.query(Partner).filter(
+        Partner.telegram_id == telegram_id
+    ).first()
 
-        if partner:
-
-            partner.telegram_id = telegram_id
-            partner.username = username
-            partner.status = PartnerStatus.ACTIVE
-
-            session.commit()
-
-            text = "✅ Telegram успешно привязан к вашему аккаунту!"
-
-        else:
-
-            text = "❌ Неверный код привязки."
+    if partner:
+        text = "👋 Добро пожаловать обратно!"
 
     else:
+        # -------------------------------------------------
+        # ПРИВЯЗКА ПО КОДУ (ТОЛЬКО САЙТ СОЗДАЁТ ПАРТНЁРА)
+        # -------------------------------------------------
 
-        partner = session.query(Partner).filter(
-            Partner.telegram_id == telegram_id
-        ).first()
+        if code:
+            partner = session.query(Partner).filter(
+                Partner.telegram_link_code == code
+            ).first()
 
-        if partner:
-            text = "👋 Добро пожаловать в NANOREM MLM"
+            if partner:
+                partner.telegram_id = telegram_id
+                partner.username = username
+                partner.first_name = first_name
+                partner.status = PartnerStatus.ACTIVE
+
+                session.commit()
+
+                text = "✅ Telegram успешно привязан!"
+
+            else:
+                text = "❌ Неверный код. Зарегистрируйтесь на сайте."
+
         else:
-            text = "Вы не зарегистрированы. Зарегистрируйтесь на сайте."
+            text = "❌ Вы не зарегистрированы. Пройдите регистрацию на сайте."
 
     session.close()
+
+    # -------------------------------------------------
+    # КНОПКИ
+    # -------------------------------------------------
 
     keyboard = [
         ["👤 Профиль", "💰 Баланс"],
@@ -69,7 +76,8 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"""👋 Привет, {first_name}!
 
-Добро пожаловать в систему партнёров NANOREM.
+{text}
+
 Выберите действие:""",
         reply_markup=reply_markup
     )

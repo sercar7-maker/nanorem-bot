@@ -3,24 +3,19 @@ from telegram.ext import MessageHandler, CommandHandler, filters
 
 from services.partner_service import PartnerService
 from services.rank_service import RankService
-from services.stats_service import StatsService
-from core.commission import CommissionCalculator
 
 from database.db import SessionLocal
-from database.models import Partner, Purchase
+from database.models import Partner
 
 logger = logging.getLogger(__name__)
 
 
 # -------------------------------------------------
-# TEST ORDER (🔥 главный тест системы)
+# TEST ORDER
 # -------------------------------------------------
-
 async def test_order(update, context):
 
     print("TEST ORDER CALLED")
-
-    await update.message.reply_text("⏳ Обрабатываю заказ...")
 
     session = SessionLocal()
     telegram_id = str(update.effective_user.id)
@@ -32,51 +27,35 @@ async def test_order(update, context):
     )
 
     if not partner:
-        print("PARTNER NOT FOUND")
-        await update.message.reply_text("❌ Вы не зарегистрированы")
+        await update.message.reply_text("Вы не зарегистрированы")
         session.close()
         return
 
-    try:
-        # создаём тестовый заказ
-        purchase = Purchase(
-            purchase_number="TEST123",
-            partner_id=partner.id,
-            amount=1000,
-            status="paid",
-            ext_ref="TEST123"
-        )
+    # 🔥 тестовый заказ
+    from web.order_handler import OrderHandler
+    from web.api_client import NanorvsAPIClient
+    from core.commission import CommissionCalculator
 
-        session.add(purchase)
-        session.commit()
-        session.refresh(purchase)
+    api_client = NanorvsAPIClient()
+    calculator = CommissionCalculator(session)
+    handler = OrderHandler(api_client, calculator)
 
-        # комиссии
-        calculator = CommissionCalculator(session)
-        await calculator.process_purchase(purchase)
+    order_data = {
+        "id": "TEST123",
+        "partner_id": partner.id,
+        "total_amount": 1000
+    }
 
-        # статистика
-        stats_service = StatsService(session)
-        stats_service.process_purchase(partner.id, 1000)
+    await handler.process_order(order_data)
 
-        # ранги
-        rank_service = RankService(session)
-        await rank_service.process_rank(partner)
+    await update.message.reply_text("✅ Тестовый заказ обработан")
 
-        await update.message.reply_text("✅ Тестовый заказ обработан")
-
-    except Exception as e:
-        print(f"TEST ORDER ERROR: {e}")
-        await update.message.reply_text(f"❌ Ошибка: {e}")
-
-    finally:
-        session.close()
+    session.close()
 
 
 # -------------------------------------------------
 # BUTTON HANDLER
 # -------------------------------------------------
-
 async def button_handler(update, context):
 
     text = update.message.text
@@ -91,11 +70,9 @@ async def button_handler(update, context):
         await update.message.reply_text(
             "Вы не зарегистрированы как партнёр."
         )
+        session.close()
         return
 
-    # -------------------------------------------------
-    # Баланс
-    # -------------------------------------------------
     if text == "💰 Баланс":
 
         balance = partner_service.get_partner_balance(partner.id)
@@ -104,20 +81,17 @@ async def button_handler(update, context):
             f"Ваш баланс: {balance:.2f} ₽"
         )
 
-    # -------------------------------------------------
-    # Профиль
-    # -------------------------------------------------
     elif text == "👤 Профиль":
+
+        rank_service = RankService(session)
+        rank = rank_service.calculate_rank(partner.id)
 
         await update.message.reply_text(
             f"Партнёр ID: {partner.id}\n"
             f"Дата регистрации: {partner.registration_date}\n"
-            f"Ранг: {partner.rank}"
+            f"Ранг: {rank}"
         )
 
-    # -------------------------------------------------
-    # Сеть
-    # -------------------------------------------------
     elif text == "👥 Моя сеть":
 
         levels = partner_service.get_network_levels(partner.id)
@@ -134,18 +108,18 @@ async def button_handler(update, context):
 
         await update.message.reply_text(message)
 
-    # -------------------------------------------------
-    # Реферальная ссылка
-    # -------------------------------------------------
     elif text == "🔗 Реферальная ссылка":
 
-        await update.message.reply_text(
-            f"https://t.me/nanorem_bot?start={partner.telegram_link_code}"
+        link_code = partner.telegram_link_code
+
+        message = (
+            "🔗 Ваша реферальная ссылка:\n\n"
+            f"https://nanorvs.ru/register?ref={link_code}\n\n"
+            "Приглашайте партнёров и зарабатывайте 💰"
         )
 
-    # -------------------------------------------------
-    # Статистика
-    # -------------------------------------------------
+        await update.message.reply_text(message)
+
     elif text == "📊 Статистика":
 
         stats = partner_service.get_partner_stats(partner.id)
@@ -162,9 +136,6 @@ async def button_handler(update, context):
 
         await update.message.reply_text(message)
 
-    # -------------------------------------------------
-    # Сайт
-    # -------------------------------------------------
     elif text == "🌐 Сайт":
 
         await update.message.reply_text(
@@ -177,7 +148,6 @@ async def button_handler(update, context):
 # -------------------------------------------------
 # SETUP
 # -------------------------------------------------
-
 def setup_handlers(application):
 
     logger.info("Registering Telegram handlers")
@@ -188,6 +158,7 @@ def setup_handlers(application):
     application.add_handler(start_handler())
     application.add_handler(balance_handler())
 
+    # 🔥 ВАЖНО — команда
     application.add_handler(CommandHandler("test_order", test_order))
 
     application.add_handler(

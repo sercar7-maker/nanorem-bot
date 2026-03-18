@@ -12,19 +12,25 @@ logger = logging.getLogger(__name__)
 
 
 class TelegramBot:
+
     def __init__(self):
 
         if not BOT_TOKEN:
             raise ValueError("BOT_TOKEN is not set!")
 
-        # ❌ убираем прокси
-        os.environ.pop("HTTP_PROXY", None)
-        os.environ.pop("HTTPS_PROXY", None)
+        # 🔥 УБИВАЕМ ПРОКСИ ЖЁСТКО
+        for key in [
+            "HTTP_PROXY", "HTTPS_PROXY",
+            "http_proxy", "https_proxy",
+            "ALL_PROXY", "all_proxy"
+        ]:
+            os.environ.pop(key, None)
 
+        # 🔥 создаём приложение БЕЗ proxy
         self.application = (
             ApplicationBuilder()
             .token(BOT_TOKEN)
-            .connection_pool_size(5)   # меньше = стабильнее
+            .connection_pool_size(5)
             .pool_timeout(5)
             .build()
         )
@@ -37,8 +43,7 @@ class TelegramBot:
         setup_handlers(self.application)
         setup_scheduler()
 
-        # 🔥 КЛЮЧЕВОЙ ФИКС
         self.application.run_polling(
             drop_pending_updates=True,
-            close_loop=False,   # 💥 фикс зависаний
+            close_loop=False,
         )

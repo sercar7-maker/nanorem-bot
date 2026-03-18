@@ -26,7 +26,7 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 # -------------------------------
 
 def generate_link_code():
-    return "".join(random.choices(string.digits, k=6))
+    return "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
 
 # -------------------------------
@@ -46,7 +46,7 @@ async def home(request: Request):
 # -------------------------------
 
 @app.get("/register", response_class=HTMLResponse)
-async def register_page(request: Request, ref: int | None = None):
+async def register_page(request: Request, ref: str | None = None):
     return templates.TemplateResponse(
         "register.html",
         {"request": request, "ref": ref}
@@ -64,12 +64,31 @@ async def register_user(
     last_name: str = Form(...),
     email: str = Form(...),
     phone: str = Form(...),
-    ref: int | None = Form(None)
+    ref: str | None = Form(None)
 ):
 
     link_code = generate_link_code()
 
     with get_session() as session:
+
+        # -------------------------------------------------
+        # ИЩЕМ АПЛАЙНА ПО REF (ВАЖНО!)
+        # -------------------------------------------------
+
+        upline = None
+        lineage = []
+
+        if ref:
+            upline = session.query(Partner).filter(
+                Partner.telegram_link_code == ref
+            ).first()
+
+            if upline:
+                lineage = (upline.lineage or []) + [upline.id]
+
+        # -------------------------------------------------
+        # СОЗДАЁМ ПАРТНЁРА
+        # -------------------------------------------------
 
         partner = Partner(
             telegram_id=None,
@@ -79,12 +98,17 @@ async def register_user(
             username=None,
             email=email,
             phone=phone,
-            upline_id=ref,
+            upline_id=upline.id if upline else None,
+            lineage=lineage,
             status=PartnerStatus.INACTIVE
         )
 
         session.add(partner)
         session.commit()
+
+    # -------------------------------------------------
+    # ОТВЕТ
+    # -------------------------------------------------
 
     return HTMLResponse(f"""
     <html>
@@ -98,7 +122,7 @@ async def register_user(
 
         <p>Ваш аккаунт создан.</p>
 
-        <p><b>Нажмите кнопку чтобы привязать Telegram:</b></p>
+        <p><b>Привяжите Telegram:</b></p>
 
         <br>
 
@@ -112,15 +136,15 @@ async def register_user(
                 border-radius:8px;
                 cursor:pointer;
             ">
-                Открыть Telegram и активировать
+                Открыть Telegram
             </button>
         </a>
 
         <br><br>
 
-        <p>Если кнопка не работает:</p>
+        <p><b>Ваша реферальная ссылка:</b></p>
 
-        <pre>https://t.me/nanorem_bot?start={link_code}</pre>
+        <pre>https://nanorvs.ru/register?ref={link_code}</pre>
 
     </body>
     </html>
@@ -132,7 +156,7 @@ async def register_user(
 # -------------------------------
 
 api_client = NanorvsAPIClient()
-calculator = CommissionCalculator()
+calculator = CommissionCalculator(None)  # если требуется — поправим позже
 order_handler = OrderHandler(api_client, calculator)
 webhook_handler = WebhookHandler(order_handler)
 
@@ -149,6 +173,6 @@ async def webhook_endpoint(request: Request):
     event_type = payload.get("event_type")
     data = payload.get("data")
 
-    result = webhook_handler.handle_webhook(event_type, data)
+    result = await webhook_handler.handle_webhook(event_type, data)
 
     return {"success": result}
