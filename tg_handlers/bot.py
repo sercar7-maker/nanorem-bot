@@ -1,5 +1,4 @@
 import logging
-import os
 
 from telegram.ext import ApplicationBuilder
 
@@ -12,26 +11,19 @@ logger = logging.getLogger(__name__)
 
 
 class TelegramBot:
-
     def __init__(self):
 
         if not BOT_TOKEN:
             raise ValueError("BOT_TOKEN is not set!")
 
-        # 🔥 УБИВАЕМ ПРОКСИ ЖЁСТКО
-        for key in [
-            "HTTP_PROXY", "HTTPS_PROXY",
-            "http_proxy", "https_proxy",
-            "ALL_PROXY", "all_proxy"
-        ]:
-            os.environ.pop(key, None)
-
-        # 🔥 создаём приложение БЕЗ proxy
+        # ✅ нормальные таймауты + стабильный polling
         self.application = (
             ApplicationBuilder()
             .token(BOT_TOKEN)
-            .connection_pool_size(5)
-            .pool_timeout(5)
+            .connect_timeout(10)
+            .read_timeout(10)
+            .write_timeout(10)
+            .pool_timeout(10)
             .build()
         )
 
@@ -41,9 +33,10 @@ class TelegramBot:
 
         init_db()
         setup_handlers(self.application)
-        setup_scheduler()
+        self.scheduler = setup_scheduler()
 
+        # ✅ уменьшаем лаги
         self.application.run_polling(
             drop_pending_updates=True,
-            close_loop=False,
+            close_loop=False
         )

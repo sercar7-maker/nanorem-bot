@@ -14,6 +14,9 @@ from core.commission import CommissionCalculator
 from web.order_handler import OrderHandler
 from web.webhook import WebhookHandler
 
+# 🔥 уведомления
+from tg_handlers.notifications import notify_new_referral
+
 
 app = FastAPI()
 
@@ -26,7 +29,7 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 # -------------------------------
 
 def generate_link_code():
-    return "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+    return "".join(random.choices(string.digits, k=6))
 
 
 # -------------------------------
@@ -46,7 +49,7 @@ async def home(request: Request):
 # -------------------------------
 
 @app.get("/register", response_class=HTMLResponse)
-async def register_page(request: Request, ref: str | None = None):
+async def register_page(request: Request, ref: int | None = None):
     return templates.TemplateResponse(
         "register.html",
         {"request": request, "ref": ref}
@@ -64,31 +67,12 @@ async def register_user(
     last_name: str = Form(...),
     email: str = Form(...),
     phone: str = Form(...),
-    ref: str | None = Form(None)
+    ref: int | None = Form(None)
 ):
 
     link_code = generate_link_code()
 
     with get_session() as session:
-
-        # -------------------------------------------------
-        # ИЩЕМ АПЛАЙНА ПО REF (ВАЖНО!)
-        # -------------------------------------------------
-
-        upline = None
-        lineage = []
-
-        if ref:
-            upline = session.query(Partner).filter(
-                Partner.telegram_link_code == ref
-            ).first()
-
-            if upline:
-                lineage = (upline.lineage or []) + [upline.id]
-
-        # -------------------------------------------------
-        # СОЗДАЁМ ПАРТНЁРА
-        # -------------------------------------------------
 
         partner = Partner(
             telegram_id=None,
@@ -98,17 +82,35 @@ async def register_user(
             username=None,
             email=email,
             phone=phone,
-            upline_id=upline.id if upline else None,
-            lineage=lineage,
+            upline_id=ref,
             status=PartnerStatus.INACTIVE
         )
 
         session.add(partner)
         session.commit()
+        session.refresh(partner)
 
-    # -------------------------------------------------
-    # ОТВЕТ
-    # -------------------------------------------------
+        # -------------------------------------------------
+        # 🔥 УВЕДОМЛЕНИЕ АПЛАЙНА
+        # -------------------------------------------------
+
+        if ref:
+            upline = session.query(Partner).filter(Partner.id == ref).first()
+
+            if upline and upline.telegram_id:
+
+                full_name = f"{first_name} {last_name}"
+
+                try:
+                    import asyncio
+                    asyncio.create_task(
+                        notify_new_referral(
+                            upline_telegram_id=int(upline.telegram_id),
+                            new_partner_name=full_name
+                        )
+                    )
+                except Exception as e:
+                    print(f"Notify error: {e}")
 
     return HTMLResponse(f"""
     <html>
@@ -122,7 +124,7 @@ async def register_user(
 
         <p>Ваш аккаунт создан.</p>
 
-        <p><b>Привяжите Telegram:</b></p>
+        <p><b>Нажмите кнопку чтобы привязать Telegram:</b></p>
 
         <br>
 
@@ -136,15 +138,15 @@ async def register_user(
                 border-radius:8px;
                 cursor:pointer;
             ">
-                Открыть Telegram
+                Открыть Telegram и активировать
             </button>
         </a>
 
         <br><br>
 
-        <p><b>Ваша реферальная ссылка:</b></p>
+        <p>Если кнопка не работает:</p>
 
-        <pre>https://nanorvs.ru/register?ref={link_code}</pre>
+        <pre>https://t.me/nanorem_bot?start={link_code}</pre>
 
     </body>
     </html>
@@ -156,7 +158,7 @@ async def register_user(
 # -------------------------------
 
 api_client = NanorvsAPIClient()
-calculator = CommissionCalculator(None)  # если требуется — поправим позже
+calculator = CommissionCalculator(None)  # тут db не нужен при init
 order_handler = OrderHandler(api_client, calculator)
 webhook_handler = WebhookHandler(order_handler)
 
