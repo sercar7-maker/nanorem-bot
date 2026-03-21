@@ -4,7 +4,12 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Tuple
 
 from database.models import Commission, Purchase, Partner
-from tg_handlers.notifications import notify_commission
+
+# ❗ УБРАЛИ старый импорт
+# from tg_handlers.notifications import notify_commission
+
+# ✅ используем нормальный сервис
+from services.notifications import NotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +26,6 @@ class CommissionResult:
 
 
 class CommissionCalculator:
-    """
-    MLM commission calculator + уведомления (БЕЗ таймаутов)
-    """
 
     LEVEL_RATES = [
         Decimal("0.20"),
@@ -33,8 +35,9 @@ class CommissionCalculator:
         Decimal("0.05"),
     ]
 
-    def __init__(self, db):
+    def __init__(self, db, bot):
         self.db = db
+        self.notify = NotificationService(bot)
 
     def calculate_purchase_commissions(
         self,
@@ -121,9 +124,7 @@ class CommissionCalculator:
 
             self.db.add(commission)
 
-            # -------------------------------------------------
-            # 🔔 УВЕДОМЛЕНИЕ (правильно, безопасно)
-            # -------------------------------------------------
+            # ✅ уведомление через единый bot
             if res.amount > 0:
 
                 upline_partner = (
@@ -135,8 +136,8 @@ class CommissionCalculator:
                 if upline_partner and upline_partner.telegram_id:
 
                     try:
-                        await notify_commission(
-                            partner_telegram_id=int(upline_partner.telegram_id),
+                        await self.notify.notify_commission(
+                            telegram_id=int(upline_partner.telegram_id),
                             amount=float(res.amount),
                             level=res.level,
                             buyer_name=partner.first_name or "партнёр"

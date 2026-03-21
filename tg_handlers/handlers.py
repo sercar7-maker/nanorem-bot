@@ -14,50 +14,55 @@ logger = logging.getLogger(__name__)
 # TEST ORDER
 # -------------------------------------------------
 async def test_order(update, context):
-
     print("TEST ORDER CALLED")
 
     session = SessionLocal()
     telegram_id = str(update.effective_user.id)
 
-    partner = (
-        session.query(Partner)
-        .filter(Partner.telegram_id == telegram_id)
-        .first()
-    )
+    try:
+        partner = (
+            session.query(Partner)
+            .filter(Partner.telegram_id == telegram_id)
+            .first()
+        )
 
-    if not partner:
-        await update.message.reply_text("Вы не зарегистрированы")
+        if not partner:
+            await update.message.reply_text("Вы не зарегистрированы")
+            return
+
+        from web.order_handler import OrderHandler
+        from web.api_client import NanorvsAPIClient
+        from core.commission import CommissionCalculator
+
+        api_client = NanorvsAPIClient()
+        calculator = CommissionCalculator(session, context.bot)
+        handler = OrderHandler(api_client, calculator)
+
+        order_data = {
+            "id": "TEST123",
+            "partner_id": partner.id,
+            "total_amount": 1000
+        }
+
+        success = await handler.process_order(order_data)
+
+        if success:
+            await update.message.reply_text(
+                "🎉 Новый человек успешно подписался и тестовый заказ обработан"
+            )
+        else:
+            await update.message.reply_text(
+                "❌ Ошибка при обработке тестового заказа"
+            )
+
+    finally:
         session.close()
-        return
-
-    # 🔥 тестовый заказ
-    from web.order_handler import OrderHandler
-    from web.api_client import NanorvsAPIClient
-    from core.commission import CommissionCalculator
-
-    api_client = NanorvsAPIClient()
-    calculator = CommissionCalculator(session)
-    handler = OrderHandler(api_client, calculator)
-
-    order_data = {
-        "id": "TEST123",
-        "partner_id": partner.id,
-        "total_amount": 1000
-    }
-
-    await handler.process_order(order_data)
-
-    await update.message.reply_text("✅ Тестовый заказ обработан")
-
-    session.close()
 
 
 # -------------------------------------------------
 # BUTTON HANDLER
 # -------------------------------------------------
 async def button_handler(update, context):
-
     text = update.message.text
     telegram_id = str(update.effective_user.id)
 
@@ -74,7 +79,6 @@ async def button_handler(update, context):
         return
 
     if text == "💰 Баланс":
-
         balance = partner_service.get_partner_balance(partner.id)
 
         await update.message.reply_text(
@@ -82,7 +86,6 @@ async def button_handler(update, context):
         )
 
     elif text == "👤 Профиль":
-
         rank_service = RankService(session)
         rank = rank_service.calculate_rank(partner.id)
 
@@ -93,7 +96,6 @@ async def button_handler(update, context):
         )
 
     elif text == "👥 Моя сеть":
-
         levels = partner_service.get_network_levels(partner.id)
 
         message = (
@@ -109,7 +111,6 @@ async def button_handler(update, context):
         await update.message.reply_text(message)
 
     elif text == "🔗 Реферальная ссылка":
-
         link_code = partner.telegram_link_code
 
         message = (
@@ -121,7 +122,6 @@ async def button_handler(update, context):
         await update.message.reply_text(message)
 
     elif text == "📊 Статистика":
-
         stats = partner_service.get_partner_stats(partner.id)
         balance = partner_service.get_partner_balance(partner.id)
 
@@ -137,10 +137,7 @@ async def button_handler(update, context):
         await update.message.reply_text(message)
 
     elif text == "🌐 Сайт":
-
-        await update.message.reply_text(
-            "https://nanorvs.ru"
-        )
+        await update.message.reply_text("https://nanorvs.ru")
 
     session.close()
 
@@ -149,7 +146,6 @@ async def button_handler(update, context):
 # SETUP
 # -------------------------------------------------
 def setup_handlers(application):
-
     logger.info("Registering Telegram handlers")
 
     from tg_handlers.start import get_handler as start_handler
@@ -158,9 +154,7 @@ def setup_handlers(application):
     application.add_handler(start_handler())
     application.add_handler(balance_handler())
 
-    # 🔥 ВАЖНО — команда
     application.add_handler(CommandHandler("test_order", test_order))
-
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, button_handler)
     )

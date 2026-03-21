@@ -1,23 +1,9 @@
 #!/usr/bin/env python3
 """NANOREM MLM System - Main Application Entry Point."""
 
-import os
 import sys
 import logging
 from pathlib import Path
-
-# ✅ ОТКЛЮЧАЕМ ВЛИЯНИЕ ПРОКСИ НА PYTHON (чтобы бот не тупил)
-os.environ["NO_PROXY"] = "*"
-os.environ["no_proxy"] = "*"
-os.environ["HTTPX_NO_PROXY"] = "*"
-
-# Дополнительно убираем возможные прокси переменные
-for key in [
-    "HTTP_PROXY", "HTTPS_PROXY",
-    "http_proxy", "https_proxy",
-    "ALL_PROXY", "all_proxy"
-]:
-    os.environ.pop(key, None)
 
 # Add project root to sys.path
 sys.path.insert(0, str(Path(__file__).parent))

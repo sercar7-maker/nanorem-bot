@@ -28,9 +28,9 @@ class PartnerStatus(enum.Enum):
 
 
 class OrderStatus(enum.Enum):
-    PENDING = "pending"
-    PAID = "paid"
-    CANCELLED = "cancelled"
+    PENDING = "PENDING"
+    PAID = "PAID"
+    CANCELLED = "CANCELLED"
 
 
 class CommissionStatus(enum.Enum):

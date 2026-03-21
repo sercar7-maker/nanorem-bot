@@ -5,9 +5,7 @@ from sqlalchemy import func
 
 
 class PartnerService:
-
     def get_partner_by_telegram_id(self, telegram_id: int):
-
         session = SessionLocal()
 
         partner = session.query(Partner).filter(
@@ -15,11 +13,9 @@ class PartnerService:
         ).first()
 
         session.close()
-
         return partner
 
     def get_partner_balance(self, partner_id: int):
-
         session = SessionLocal()
 
         balance = session.query(
@@ -29,16 +25,10 @@ class PartnerService:
         ).scalar()
 
         session.close()
-
         return balance
 
     def get_network_levels(self, partner_id: int):
-
         session = SessionLocal()
-
-        partners = session.query(Partner).all()
-
-        session.close()
 
         levels = {
             1: 0,
@@ -48,52 +38,71 @@ class PartnerService:
             5: 0
         }
 
-        total = 0
+        try:
+            level_1 = session.query(Partner).filter(
+                Partner.upline_id == partner_id
+            ).all()
+            levels[1] = len(level_1)
 
-        for p in partners:
+            level_1_ids = [p.id for p in level_1]
+            if level_1_ids:
+                level_2 = session.query(Partner).filter(
+                    Partner.upline_id.in_(level_1_ids)
+                ).all()
+                levels[2] = len(level_2)
+            else:
+                level_2 = []
 
-            if not p.lineage:
-                continue
+            level_2_ids = [p.id for p in level_2]
+            if level_2_ids:
+                level_3 = session.query(Partner).filter(
+                    Partner.upline_id.in_(level_2_ids)
+                ).all()
+                levels[3] = len(level_3)
+            else:
+                level_3 = []
 
-            if partner_id in p.lineage:
+            level_3_ids = [p.id for p in level_3]
+            if level_3_ids:
+                level_4 = session.query(Partner).filter(
+                    Partner.upline_id.in_(level_3_ids)
+                ).all()
+                levels[4] = len(level_4)
+            else:
+                level_4 = []
 
-                level = p.lineage.index(partner_id) + 1
+            level_4_ids = [p.id for p in level_4]
+            if level_4_ids:
+                level_5 = session.query(Partner).filter(
+                    Partner.upline_id.in_(level_4_ids)
+                ).all()
+                levels[5] = len(level_5)
 
-                if level <= 5:
-                    levels[level] += 1
-                    total += 1
+            levels["total"] = (
+                levels[1] + levels[2] + levels[3] + levels[4] + levels[5]
+            )
 
-        levels["total"] = total
+            return levels
 
-        return levels
+        finally:
+            session.close()
 
     def get_partner_stats(self, partner_id: int):
-
         session = SessionLocal()
 
-        # -----------------------------
-        # Партнёры в сети
-        # -----------------------------
         partners = session.query(Partner).all()
-
         total_partners = 0
 
         for p in partners:
-            if p.lineage and partner_id in p.lineage:
+            if p.upline_id == partner_id:
                 total_partners += 1
 
-        # -----------------------------
-        # Комиссии
-        # -----------------------------
         total_commission = session.query(
             func.coalesce(func.sum(Commission.amount), 0)
         ).filter(
             Commission.partner_id == partner_id
         ).scalar()
 
-        # -----------------------------
-        # Обороты
-        # -----------------------------
         stats = session.query(PartnerStats).filter(
             PartnerStats.partner_id == partner_id
         ).first()
