@@ -4,6 +4,7 @@ from fastapi.templating import Jinja2Templates
 from pathlib import Path
 import random
 import string
+import asyncio
 
 from database.db import get_session
 from database.models import Partner, PartnerStatus
@@ -14,7 +15,7 @@ from core.commission import CommissionCalculator
 from web.order_handler import OrderHandler
 from web.webhook import WebhookHandler
 
-# 🔥 уведомления
+# уведомления
 from tg_handlers.notifications import notify_new_referral
 
 
@@ -24,17 +25,9 @@ BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
-# -------------------------------
-# Генерация кода Telegram
-# -------------------------------
-
 def generate_link_code():
     return "".join(random.choices(string.digits, k=6))
 
-
-# -------------------------------
-# Главная страница
-# -------------------------------
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
@@ -44,10 +37,6 @@ async def home(request: Request):
     )
 
 
-# -------------------------------
-# Страница регистрации
-# -------------------------------
-
 @app.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request, ref: int | None = None):
     return templates.TemplateResponse(
@@ -55,10 +44,6 @@ async def register_page(request: Request, ref: int | None = None):
         {"request": request, "ref": ref}
     )
 
-
-# -------------------------------
-# Обработка регистрации
-# -------------------------------
 
 @app.post("/register", response_class=HTMLResponse)
 async def register_user(
@@ -69,11 +54,9 @@ async def register_user(
     phone: str = Form(...),
     ref: int | None = Form(None)
 ):
-
     link_code = generate_link_code()
 
     with get_session() as session:
-
         partner = Partner(
             telegram_id=None,
             telegram_link_code=link_code,
@@ -90,19 +73,13 @@ async def register_user(
         session.commit()
         session.refresh(partner)
 
-        # -------------------------------------------------
-        # 🔥 УВЕДОМЛЕНИЕ АПЛАЙНА
-        # -------------------------------------------------
-
         if ref:
             upline = session.query(Partner).filter(Partner.id == ref).first()
 
             if upline and upline.telegram_id:
-
                 full_name = f"{first_name} {last_name}"
 
                 try:
-                    import asyncio
                     asyncio.create_task(
                         notify_new_referral(
                             upline_telegram_id=int(upline.telegram_id),
@@ -153,23 +130,14 @@ async def register_user(
     """)
 
 
-# -------------------------------
-# Инициализация MLM webhook
-# -------------------------------
-
 api_client = NanorvsAPIClient()
-calculator = CommissionCalculator(None)  # тут db не нужен при init
+calculator = CommissionCalculator(None, None)
 order_handler = OrderHandler(api_client, calculator)
 webhook_handler = WebhookHandler(order_handler)
 
 
-# -------------------------------
-# Webhook endpoint
-# -------------------------------
-
 @app.post("/webhook")
 async def webhook_endpoint(request: Request):
-
     payload = await request.json()
 
     event_type = payload.get("event_type")
