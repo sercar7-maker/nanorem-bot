@@ -6,7 +6,10 @@ import random
 import string
 import asyncio
 
-from database.db import get_session
+from telegram import Bot
+
+from config import BOT_TOKEN
+from database.db import get_session, SessionLocal
 from database.models import Partner, PartnerStatus
 
 # MLM imports
@@ -131,7 +134,9 @@ async def register_user(
 
 
 api_client = NanorvsAPIClient()
-calculator = CommissionCalculator(None, None)
+web_db = SessionLocal()
+web_bot = Bot(token=BOT_TOKEN)
+calculator = CommissionCalculator(web_db, web_bot)
 order_handler = OrderHandler(api_client, calculator)
 webhook_handler = WebhookHandler(order_handler)
 
