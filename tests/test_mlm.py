@@ -14,15 +14,16 @@ for key in [
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from telegram import Bot
-
-from config import BOT_TOKEN
 from database.db import get_session
 from database.models import Partner, Purchase, Commission, OrderStatus, CommissionStatus
+from tg_handlers.bot import TelegramBot
 from services.notifications import NotificationService
 
 
 async def main():
+    tg_bot = TelegramBot()
+    notify = NotificationService(tg_bot.bot)
+
     with get_session() as session:
         me = session.query(Partner).filter(
             Partner.telegram_id == "899738024"
@@ -72,12 +73,11 @@ async def main():
         session.commit()
 
         if me.telegram_id:
-            bot = Bot(token=BOT_TOKEN)
-            notify = NotificationService(bot)
-
-            await notify.notify_new_referral(
+            await notify.notify_commission(
                 telegram_id=int(me.telegram_id),
-                partner_name=f"{test_partner.first_name} {test_partner.last_name}"
+                amount=200,
+                level=1,
+                buyer_name=f"{test_partner.first_name} {test_partner.last_name}"
             )
 
     print("MLM TEST CREATED SUCCESSFULLY")
