@@ -14,15 +14,17 @@ for key in [
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from telegram import Bot
+
+from config import BOT_TOKEN
 from database.db import get_session
 from database.models import Partner, Purchase, Commission, OrderStatus, CommissionStatus
-from tg_handlers.bot import TelegramBot
 from services.notifications import NotificationService
 
 
 async def main():
-    tg_bot = TelegramBot()
-    notify = NotificationService(tg_bot.bot)
+    bot = Bot(token=BOT_TOKEN)
+    notify = NotificationService(bot)
 
     with get_session() as session:
         me = session.query(Partner).filter(
