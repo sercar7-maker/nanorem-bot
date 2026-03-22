@@ -19,7 +19,7 @@ from web.order_handler import OrderHandler
 from web.webhook import WebhookHandler
 
 # уведомления
-from tg_handlers.notifications import notify_new_referral
+from services.notifications import NotificationService
 
 
 app = FastAPI()
@@ -95,16 +95,16 @@ async def register_user(
     return HTMLResponse(f"""
     <html>
     <head>
-        <title>Регистрация завершена</title>
+        <title>Р РµРіРёСЃС‚СЂР°С†РёСЏ Р·Р°РІРµСЂС€РµРЅР°</title>
     </head>
 
     <body style="font-family:Arial;text-align:center;margin-top:60px;">
 
-        <h2>Регистрация завершена</h2>
+        <h2>Р РµРіРёСЃС‚СЂР°С†РёСЏ Р·Р°РІРµСЂС€РµРЅР°</h2>
 
-        <p>Ваш аккаунт создан.</p>
+        <p>Р’Р°С€ Р°РєРєР°СѓРЅС‚ СЃРѕР·РґР°РЅ.</p>
 
-        <p><b>Нажмите кнопку чтобы привязать Telegram:</b></p>
+        <p><b>РќР°Р¶РјРёС‚Рµ РєРЅРѕРїРєСѓ С‡С‚РѕР±С‹ РїСЂРёРІСЏР·Р°С‚СЊ Telegram:</b></p>
 
         <br>
 
@@ -118,13 +118,13 @@ async def register_user(
                 border-radius:8px;
                 cursor:pointer;
             ">
-                Открыть Telegram и активировать
+                РћС‚РєСЂС‹С‚СЊ Telegram Рё Р°РєС‚РёРІРёСЂРѕРІР°С‚СЊ
             </button>
         </a>
 
         <br><br>
 
-        <p>Если кнопка не работает:</p>
+        <p>Р•СЃР»Рё РєРЅРѕРїРєР° РЅРµ СЂР°Р±РѕС‚Р°РµС‚:</p>
 
         <pre>https://t.me/nanorem_bot?start={link_code}</pre>
 
