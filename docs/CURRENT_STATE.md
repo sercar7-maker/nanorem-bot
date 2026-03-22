@@ -254,9 +254,56 @@
 
 `python -c "import requests; print(requests.get('https://api.telegram.org', timeout=10).status_code)"`
 
-Результат:
+Результат на одном из запусков:
 
 - `200`
+
+Позже проверка стала нестабильной:
+
+- без `verify=False` запросы начали иногда падать
+- после временного отключения `Hiddify` запрос к `api.telegram.org` завершился `ReadTimeout`
+- с `verify=False` запрос к `api.telegram.org` завершался `UNEXPECTED_EOF_WHILE_READING`
+
+## requests / другие сайты
+
+### Google
+Команда:
+
+`python -c "import requests; print(requests.get('https://www.google.com', timeout=10).status_code)"`
+
+Результат на одном из запусков:
+
+- `200`
+
+Позже поведение стало нестабильным:
+
+- запрос к `www.google.com` начал падать с `UNEXPECTED_EOF_WHILE_READING`
+
+### example.com
+Команда:
+
+`python -c "import requests; print(requests.get('https://example.com', timeout=10).status_code)"`
+
+Результат:
+
+- `SSLError`
+- `UNEXPECTED_EOF_WHILE_READING`
+
+Команда:
+
+`python -c "import requests; print(requests.get('https://example.com', timeout=10, verify=False).status_code)"`
+
+Результат:
+
+- ошибка остаётся
+- `UNEXPECTED_EOF_WHILE_READING`
+
+Вывод по `requests`:
+
+- поведение нестабильное
+- часть HTTPS-запросов иногда проходит
+- часть падает по SSL/TLS
+- проблема не сводится только к проверке сертификата
 
 ## httpx
 Команда:
@@ -288,6 +335,32 @@
 - ошибка остаётся
 - `httpx.ConnectTimeout: _ssl.c:989: The handshake operation timed out`
 
+## httpx / другие сайты
+Команда:
+
+`python -c "import httpx; r=httpx.get('https://example.com', timeout=10, trust_env=False); print(r.status_code)"`
+
+Результат:
+
+- `httpx.ConnectError`
+- `CERTIFICATE_VERIFY_FAILED`
+
+Команда:
+
+`python -c "import httpx, certifi; r=httpx.get('https://example.com', timeout=10, trust_env=False, verify=certifi.where()); print(r.status_code)"`
+
+Результат:
+
+- ошибка остаётся
+- `CERTIFICATE_VERIFY_FAILED`
+
+Вывод по `httpx`:
+
+- проблема не только на Telegram
+- `trust_env=False` не помогает
+- `http2=False` не помогает
+- явный `certifi.where()` не помогает
+
 ## WinHTTP proxy
 Команда:
 
@@ -309,13 +382,21 @@
 ## Среда Windows / VPN
 На ПК установлены два VPN:
 
-- `Hiddify` — используется сейчас
-- `Outline` — отключён, но не удалён
+- `Hiddify`
+- `Outline`
 
-Это важно, потому что проблема может зависеть не от кода проекта, а от особенностей сетевой среды Windows / VPN / TLS-стека.
+Что дополнительно выяснено:
 
-## Зафиксированные версии библиотек
+- `Outline` ранее был отключён, но не удалён
+- при попытке вернуть `Hiddify` в рабочее состояние он тоже начал показывать timeout
+- даже при временном отключении `Hiddify` проблема с HTTPS/TLS не исчезла
 
+Это усиливает вывод, что проблема зависит не от кода проекта, а от состояния сетевой среды Windows / VPN / маршрутов / TLS-стека.
+
+## Зафиксированные версии среды
+
+- `Python = 3.11.7`
+- `OpenSSL = 3.0.11`
 - `python-telegram-bot = 22.6`
 - `httpx = 0.27.2`
 - `httpcore = 1.0.5`
@@ -333,8 +414,8 @@
 - проблема не в proxy-переменных окружения
 - проблема не снимается через `trust_env=False`
 - проблема не снимается через `http2=False`
-- `requests` работает, а `httpx/httpcore` не работает
-- проблема локализована до TLS/HTTPS-стека `httpx/httpcore` в этой Windows-среде
+- проблема не снимается через явный `certifi.where()`
+- проблема уже выглядит не как ошибка только `httpx`, а как нестабильная внешняя TLS/HTTPS-проблема среды Windows/VPN/маршрутов
 
 ---
 
@@ -441,6 +522,7 @@
 - `205898c` — `Web app переведён на NotificationService`
 - `aa207fc` — `Тест MLM переведён на прямой Bot для диагностики TLS`
 - `abf40f8` — `Обновлён CURRENT_STATE после унификации уведомлений`
+- `d2217b4` — `Обновлён CURRENT_STATE по диагностике httpx TLS`
 
 Также сохранён tag:
 
@@ -454,9 +536,10 @@
 
 Варианты следующей работы:
 
-1. продолжить диагностику TLS на Windows
-2. временно перейти к другой части бизнес-логики MLM
-3. позже вернуться к фактической отправке Telegram-уведомлений после сетевой диагностики среды
+1. сначала стабилизировать сеть / VPN-среду Windows
+2. затем повторить минимальные HTTPS-тесты `requests` и `httpx`
+3. только после этого возвращаться к фактической отправке Telegram-уведомлений
+4. бизнес-логика MLM сейчас не является блокером
 
 ---
 
@@ -483,17 +566,19 @@
 - `web/app.py` переведён на `NotificationService`
 - `core/commission.py` использует `NotificationService`
 - диагностикой подтверждено, что код доходит до Telegram API
-- диагностикой подтверждено, что проблема в `httpx/httpcore`, а не в общей доступности Telegram API
+- диагностикой подтверждено, что текущий блокер находится вне бизнес-логики проекта
 
 Что не добито до конца:
 
 - фактическая отправка Telegram-уведомлений с этой машины
-- устранение TLS-проблемы среды Windows/Python/httpx
+- стабилизация сети / VPN / TLS-среды Windows
+- повторная проверка HTTPS после стабилизации сети
 - стабильная интеграция с сайтом / webhook в боевом виде
 - полный сетевой оборот
 
 Следующая задача:
 
-👉 решить TLS/HTTPS-проблему среды  
-👉 после этого снова протестировать полный цикл уведомлений  
+👉 сначала стабилизировать сетевую среду  
+👉 потом повторить HTTPS-проверки  
+👉 после этого снова тестировать полный цикл уведомлений  
 👉 затем продолжить боевую интеграцию
