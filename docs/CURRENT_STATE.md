@@ -1,6 +1,6 @@
 # NANOREM MLM — Current State
 
-Дата: 21 марта 2026
+Дата: 22 марта 2026
 
 ---
 
@@ -60,7 +60,7 @@
 
 ---
 
-# Что уже исправлено сегодня
+# Что уже исправлено
 
 ## PartnerService
 
@@ -134,12 +134,18 @@
 
 # Уведомления: текущее состояние
 
-Сейчас в проекте есть **два механизма уведомлений**:
+Сейчас в проекте оставлен **один механизм уведомлений**:
 
 1. `services/notifications.py`
-2. `tg_handlers/notifications.py`
 
-Это источник путаницы.
+Что сделано:
+
+- удалён `tg_handlers/notifications.py`
+- удалён `tg_notify/notifications.py`
+- `web/app.py` переведён на `NotificationService`
+- `core/commission.py` использует `NotificationService`
+- в `services/notifications.py` используется класс `NotificationService`
+- bot передаётся в сервис извне, отдельный `Bot(token=BOT_TOKEN)` внутри `services/notifications.py` больше не создаётся
 
 ## Что используется сейчас
 
@@ -151,19 +157,19 @@
 - `NotificationService`
 - импорт из `services/notifications.py`
 
-То есть уведомление о комиссии сейчас идёт через:
-
-- `services/notifications.py`
-
 ### Новый партнёр
 Файл: `web/app.py`
 
-Пока использует:
+Использует:
 
-- `notify_new_referral`
-- импорт из `tg_handlers/notifications.py`
+- `NotificationService`
+- импорт из `services/notifications.py`
 
-То есть сейчас система уведомлений ещё **не полностью унифицирована**.
+Итог:
+
+- система уведомлений **унифицирована**
+- дубли удалены
+- правило **один Bot instance на всё приложение** соблюдается на уровне архитектуры уведомлений
 
 ---
 
@@ -175,14 +181,16 @@
 
 - `tests/test_mlm.py`
 
-Последняя версия теста:
+Текущая версия теста:
 
 - создаёт тестового партнёра
 - создаёт тестовую покупку
 - создаёт тестовую комиссию
-- берёт bot через `TelegramBot()`
-- вызывает `NotificationService(tg_bot.bot)`
+- создаёт bot напрямую через `Bot(token=BOT_TOKEN)`
+- вызывает `NotificationService(bot)`
 - пытается отправить уведомление о комиссии
+
+Это было сделано специально для диагностики, чтобы убрать влияние `ApplicationBuilder` и проверить прямой вызов Telegram Bot API.
 
 ## Результат последней проверки
 
@@ -191,16 +199,22 @@
 - `notify_commission()`
 - `bot.send_message(...)`
 
-Но фактическая отправка падает с ошибкой сети:
+Но фактическая отправка не проходит.
 
-- `ConnectTimeout`
-- таймаут на TLS handshake с `api.telegram.org`
+Последний результат Python-теста:
+
+- `connect_tcp` проходит успешно
+- ошибка возникает на шаге TLS
+- `start_tls.failed`
+- `ConnectTimeout(TimeoutError())`
 
 Это значит:
 
 - логика Python-кода уже доходит до отправки
 - проблема сейчас не в `NotificationService`
-- проблема сейчас в сетевом соединении Python → Telegram API
+- проблема не в `web/app.py`
+- проблема не в `core/commission.py`
+- проблема в сетевом TLS/HTTPS-соединении Python → Telegram API
 
 ---
 
@@ -211,15 +225,48 @@
 - proxy-переменные в PowerShell не видны
 - `Test-NetConnection api.telegram.org -Port 443` = успешно
 - TCP до Telegram есть
-- но Python при HTTPS/TLS всё ещё ловит timeout
 
-Вывод:
+Дополнительные проверки:
+
+## curl
+Команда:
+
+`curl.exe -v https://api.telegram.org`
+
+Результат:
+
+- TLS handshake не проходит
+- ошибка:
+  - `Connection was reset`
+  - `schannel: failed to receive handshake, SSL/TLS connection failed`
+
+## PowerShell
+Команда:
+
+`Invoke-WebRequest https://api.telegram.org`
+
+Результат:
+
+- `200 OK`
+
+## Python
+Тест через `python-telegram-bot` и прямой `Bot(...)` показывает:
+
+- TCP соединение открывается
+- TLS handshake завершается ошибкой
+- ошибка доходит до:
+  - `ConnectError(BrokenResourceError())`
+  - или `ConnectTimeout(TimeoutError())`
+
+Вывод на текущий момент:
 
 - проблема не в бизнес-логике MLM
 - проблема не в расчёте комиссий
 - проблема не в `PartnerService`
 - проблема не в `config.py`
-- проблема на уровне Python HTTPS-соединения к Telegram API
+- проблема не в `ApplicationBuilder`
+- проблема не в самом `NotificationService`
+- проблема локализована до TLS/HTTPS-стека на этой Windows-машине для Python/curl
 
 ---
 
@@ -282,7 +329,7 @@
 
 ---
 
-# Установленные пакеты сегодня
+# Установленные пакеты
 
 Для корректного импорта `web/app.py` были установлены:
 
@@ -301,12 +348,12 @@
 - `web/app.py`
 - `tests/test_mlm.py`
 
-## Файлы, которые завтра смотреть в первую очередь
+## Файлы, которые смотреть в первую очередь дальше
 1. `tests/test_mlm.py`
 2. `services/notifications.py`
-3. `core/commission.py`
-4. `web/app.py`
-5. `tg_handlers/notifications.py`
+3. `tg_handlers/bot.py`
+4. `core/commission.py`
+5. `web/app.py`
 
 ---
 
@@ -320,29 +367,27 @@
 
 - clean
 
-Последний важный commit на сегодня:
+Последние важные commit'ы:
 
-- `7c9ca34` — `Обновлён тест уведомления MLM`
+- `eaeb5c7` — `Убраны дубли уведомлений`
+- `205898c` — `Web app переведён на NotificationService`
+- `aa207fc` — `Тест MLM переведён на прямой Bot для диагностики TLS`
 
-Также сегодня был commit:
+Также сохранён tag:
 
-- `a95a58f` — `Исправлена инициализация webhook уведомлений`
+- `checkpoint_notifications_tls_diag`
 
-Все изменения уже отправлены на GitHub.
+Все изменения отправлены на GitHub.
 
 ---
 
-# Что делать завтра первым шагом
+# Что делать следующим шагом
 
-1. Открыть ветку `notifications_fix`
-2. Убедиться, что `git status` = clean
-3. Открыть `tests/test_mlm.py`
-4. Запустить:
-   `python .\tests\test_mlm.py`
-5. Проверять именно сетевую отправку уведомления
-6. Дальше привести уведомления к одному механизму:
-   - либо всё через `services/notifications.py`
-   - либо полностью убрать дубли из `tg_handlers/notifications.py`
+Варианты следующей работы:
+
+1. продолжить диагностику TLS на Windows
+2. временно перейти к другой части бизнес-логики MLM
+3. позже вернуться к фактической отправке Telegram-уведомлений после сетевой диагностики среды
 
 ---
 
@@ -361,15 +406,24 @@
 - расчёт сети по уровням
 - тестовая комиссия в базе
 - webhook-инициализация без `None, None`
+- единый механизм уведомлений через `services/notifications.py`
+
+Что уже доведено до конца:
+
+- удалены дубли уведомлений
+- `web/app.py` переведён на `NotificationService`
+- `core/commission.py` использует `NotificationService`
+- диагностикой подтверждено, что код доходит до Telegram API
 
 Что не добито до конца:
 
-- фактическая отправка Telegram-уведомлений
-- полное объединение двух систем уведомлений
+- фактическая отправка Telegram-уведомлений с этой машины
+- устранение TLS-проблемы среды Windows/Python/curl
 - стабильная интеграция с сайтом / webhook в боевом виде
+- полный сетевой оборот
 
 Следующая задача:
 
-👉 добить отправку уведомлений  
-👉 оставить один механизм уведомлений  
-👉 после этого снова протестировать полный цикл комиссии
+👉 решить TLS/HTTPS-проблему среды  
+👉 после этого снова протестировать полный цикл уведомлений  
+👉 затем продолжить боевую интеграцию
