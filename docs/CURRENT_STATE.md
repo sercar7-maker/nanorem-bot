@@ -249,7 +249,55 @@
 
 - `200 OK`
 
-## Python
+## requests
+Команда:
+
+`python -c "import requests; print(requests.get('https://api.telegram.org', timeout=10).status_code)"`
+
+Результат:
+
+- `200`
+
+## httpx
+Команда:
+
+`python -c "import httpx; r=httpx.get('https://api.telegram.org', timeout=10); print(r.status_code)"`
+
+Результат:
+
+- ошибка TLS handshake
+- `httpx.ConnectTimeout: _ssl.c:989: The handshake operation timed out`
+
+## httpx без окружения
+Команда:
+
+`python -c "import httpx; r=httpx.get('https://api.telegram.org', timeout=10, trust_env=False); print(r.status_code)"`
+
+Результат:
+
+- ошибка остаётся
+- `httpx.ConnectTimeout: _ssl.c:989: The handshake operation timed out`
+
+## httpx с явным HTTP/1.1
+Команда:
+
+`python -c "import httpx; c=httpx.Client(http2=False, trust_env=False, timeout=10); r=c.get('https://api.telegram.org'); print(r.status_code); c.close()"`
+
+Результат:
+
+- ошибка остаётся
+- `httpx.ConnectTimeout: _ssl.c:989: The handshake operation timed out`
+
+## WinHTTP proxy
+Команда:
+
+`netsh winhttp show proxy`
+
+Результат:
+
+- `Прямой доступ (без прокси-сервера)`
+
+## Python / Telegram
 Тест через `python-telegram-bot` и прямой `Bot(...)` показывает:
 
 - TCP соединение открывается
@@ -257,6 +305,22 @@
 - ошибка доходит до:
   - `ConnectError(BrokenResourceError())`
   - или `ConnectTimeout(TimeoutError())`
+
+## Среда Windows / VPN
+На ПК установлены два VPN:
+
+- `Hiddify` — используется сейчас
+- `Outline` — отключён, но не удалён
+
+Это важно, потому что проблема может зависеть не от кода проекта, а от особенностей сетевой среды Windows / VPN / TLS-стека.
+
+## Зафиксированные версии библиотек
+
+- `python-telegram-bot = 22.6`
+- `httpx = 0.27.2`
+- `httpcore = 1.0.5`
+- `requests = 2.32.5`
+- `certifi = 2026.2.25`
 
 Вывод на текущий момент:
 
@@ -266,7 +330,11 @@
 - проблема не в `config.py`
 - проблема не в `ApplicationBuilder`
 - проблема не в самом `NotificationService`
-- проблема локализована до TLS/HTTPS-стека на этой Windows-машине для Python/curl
+- проблема не в proxy-переменных окружения
+- проблема не снимается через `trust_env=False`
+- проблема не снимается через `http2=False`
+- `requests` работает, а `httpx/httpcore` не работает
+- проблема локализована до TLS/HTTPS-стека `httpx/httpcore` в этой Windows-среде
 
 ---
 
@@ -372,6 +440,7 @@
 - `eaeb5c7` — `Убраны дубли уведомлений`
 - `205898c` — `Web app переведён на NotificationService`
 - `aa207fc` — `Тест MLM переведён на прямой Bot для диагностики TLS`
+- `abf40f8` — `Обновлён CURRENT_STATE после унификации уведомлений`
 
 Также сохранён tag:
 
@@ -414,11 +483,12 @@
 - `web/app.py` переведён на `NotificationService`
 - `core/commission.py` использует `NotificationService`
 - диагностикой подтверждено, что код доходит до Telegram API
+- диагностикой подтверждено, что проблема в `httpx/httpcore`, а не в общей доступности Telegram API
 
 Что не добито до конца:
 
 - фактическая отправка Telegram-уведомлений с этой машины
-- устранение TLS-проблемы среды Windows/Python/curl
+- устранение TLS-проблемы среды Windows/Python/httpx
 - стабильная интеграция с сайтом / webhook в боевом виде
 - полный сетевой оборот
 
