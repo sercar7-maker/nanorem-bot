@@ -84,9 +84,9 @@ async def register_user(
 
                 try:
                     asyncio.create_task(
-                        notify_new_referral(
-                            upline_telegram_id=int(upline.telegram_id),
-                            new_partner_name=full_name
+                        notification_service.notify_new_referral(
+                            telegram_id=int(upline.telegram_id),
+                            partner_name=full_name
                         )
                     )
                 except Exception as e:
@@ -136,6 +136,7 @@ async def register_user(
 api_client = NanorvsAPIClient()
 web_db = SessionLocal()
 web_bot = Bot(token=BOT_TOKEN)
+notification_service = NotificationService(web_bot)
 calculator = CommissionCalculator(web_db, web_bot)
 order_handler = OrderHandler(api_client, calculator)
 webhook_handler = WebhookHandler(order_handler)
