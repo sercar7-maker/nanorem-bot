@@ -4,12 +4,8 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Tuple
 
 from database.models import Commission, Purchase, Partner
-
-# ❗ УБРАЛИ старый импорт
-# from tg_handlers.notifications import notify_commission
-
-# ✅ используем нормальный сервис
 from services.notifications import NotificationService
+from services.commission_service import CommissionService
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +34,7 @@ class CommissionCalculator:
     def __init__(self, db, bot):
         self.db = db
         self.notify = NotificationService(bot)
+        self.commission_service = CommissionService(db)
 
     def calculate_purchase_commissions(
         self,
@@ -54,20 +51,6 @@ class CommissionCalculator:
                 break
 
             rate = self.LEVEL_RATES[level - 1]
-
-            if not is_active:
-                commissions.append(
-                    CommissionResult(
-                        partner_id=partner_id,
-                        level=level,
-                        rate=rate,
-                        base_amount=purchase_amount,
-                        amount=Decimal("0.00"),
-                        compressed=True,
-                        notes="Partner inactive"
-                    )
-                )
-                continue
 
             amount = (purchase_amount * rate).quantize(
                 Decimal("0.01"), rounding=ROUND_HALF_UP
@@ -87,8 +70,11 @@ class CommissionCalculator:
 
     async def process_purchase(self, purchase: Purchase):
 
-        if purchase.is_commission_processed:
-            return
+        print("🚀 PROCESS PURCHASE CALLED")
+
+        # ❌ ВРЕМЕННО ОТКЛЮЧАЕМ ЭТУ ПРОВЕРКУ
+        # if purchase.is_commission_processed:
+        #     return
 
         partner = (
             self.db.query(Partner)
@@ -97,9 +83,13 @@ class CommissionCalculator:
         )
 
         if not partner:
+            print("❌ partner not found")
             return
 
         lineage = partner.lineage or []
+
+        print(f"🌳 LINEAGE: {lineage}")
+
         upline_chain = [(pid, True) for pid in reversed(lineage)]
 
         results = self.calculate_purchase_commissions(
@@ -108,7 +98,11 @@ class CommissionCalculator:
             upline_chain=upline_chain
         )
 
+        print(f"📊 RESULTS: {results}")
+
         for res in results:
+
+            print(f"💾 ADD commission {res.amount} to {res.partner_id}")
 
             commission = Commission(
                 partner_id=res.partner_id,
@@ -123,28 +117,12 @@ class CommissionCalculator:
             )
 
             self.db.add(commission)
+            self.db.flush()
 
-            # ✅ уведомление через единый bot
-            if res.amount > 0:
-
-                upline_partner = (
-                    self.db.query(Partner)
-                    .filter(Partner.id == res.partner_id)
-                    .first()
-                )
-
-                if upline_partner and upline_partner.telegram_id:
-
-                    try:
-                        await self.notify.notify_commission(
-                            telegram_id=int(upline_partner.telegram_id),
-                            amount=float(res.amount),
-                            level=res.level,
-                            buyer_name=partner.first_name or "партнёр"
-                        )
-                    except Exception as e:
-                        logger.error(f"Notify failed: {e}")
+            self.commission_service.approve_commission(commission)
 
         purchase.is_commission_processed = True
 
         self.db.commit()
+
+        print("✅ DONE")

@@ -3,7 +3,6 @@ import logging
 from telegram import Bot
 
 from config import BOT_TOKEN
-from core.commission import CommissionCalculator
 from core.network import NetworkManager
 from database.db import SessionLocal
 from database.models import Partner, Purchase, OrderStatus
@@ -18,7 +17,7 @@ class OrderHandler:
     def __init__(
         self,
         api_client: NanorvsAPIClient,
-        commission_calculator: CommissionCalculator
+        commission_calculator
     ):
         self.api_client = api_client
         self.commission_calculator = commission_calculator
@@ -31,6 +30,8 @@ class OrderHandler:
         session = SessionLocal()
 
         try:
+            print("🚀 ORDER START")
+
             order_id = order_data["id"]
             partner_id = order_data["partner_id"]
             amount = float(order_data["total_amount"])
@@ -38,6 +39,8 @@ class OrderHandler:
             purchase = session.query(Purchase).filter_by(ext_ref=str(order_id)).first()
 
             if not purchase:
+                print("📦 creating purchase")
+
                 purchase = Purchase(
                     purchase_number=str(order_id),
                     partner_id=partner_id,
@@ -49,7 +52,18 @@ class OrderHandler:
                 session.commit()
                 session.refresh(purchase)
 
+            print(f"📦 PURCHASE ID: {purchase.id}")
+
+            # 🔥 ВАЖНО
+            print("👉 CALLING COMMISSION CALCULATOR")
+
+            self.commission_calculator.session = session
+
             await self.commission_calculator.process_purchase(purchase)
+
+            print("✅ COMMISSION CALCULATOR CALLED")
+
+            session.commit()
 
             stats_service = StatsService(session)
             stats_service.process_purchase(
@@ -75,6 +89,7 @@ class OrderHandler:
 
         except Exception as e:
             logger.error(f"Failed to process order: {e}")
+            print(f"❌ ERROR: {e}")
             return False
 
         finally:

@@ -1,89 +1,69 @@
-import os
 import sys
-from pathlib import Path
-import uuid
-import random
-import asyncio
+import os
 
-os.environ["NO_PROXY"] = "*"
-for key in [
-    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
-    "http_proxy", "https_proxy", "all_proxy"
-]:
-    os.environ.pop(key, None)
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from telegram import Bot
-
-from config import BOT_TOKEN
-from database.db import get_session
-from database.models import Partner, Purchase, Commission, OrderStatus, CommissionStatus
-from services.notifications import NotificationService
+from database.db import SessionLocal
+from database.models import Partner, Purchase, OrderStatus
+from core.commission import CommissionCalculator
 
 
-async def main():
-    bot = Bot(token=BOT_TOKEN)
-    notify = NotificationService(bot)
+class FakeBot:
+    async def send_message(self, *args, **kwargs):
+        print("📩 FAKE MESSAGE SENT")
 
-    with get_session() as session:
-        me = session.query(Partner).filter(
-            Partner.telegram_id == "899738024"
-        ).first()
 
-        if not me:
-            print("MAIN PARTNER NOT FOUND")
-            return
+def main():
+    session = SessionLocal()
 
-        random_id = str(random.randint(100000000, 999999999))
+    # 1. найти тебя
+    you = session.query(Partner).filter_by(telegram_id="899738024").first()
 
-        test_partner = Partner(
-            telegram_id=random_id,
-            first_name="TestPartner",
-            last_name="Demo",
-            upline_id=me.id
+    # 2. найти партнёра под тобой
+    user = session.query(Partner).filter_by(upline_id=you.id).first()
+
+    if not user:
+        print("❌ нет партнёра под тобой")
+        return
+
+    print(f"👤 Ты: {you.id}")
+    print(f"👤 Нижний партнёр: {user.id}")
+
+    # 3. создаём заказ
+    purchase = Purchase(
+        purchase_number="TEST_LOCAL",
+        partner_id=user.id,
+        amount=1000,
+        status=OrderStatus.PAID,
+        ext_ref="TEST_LOCAL",
+    )
+
+    session.add(purchase)
+    session.commit()
+    session.refresh(purchase)
+
+    print(f"📦 Purchase ID: {purchase.id}")
+
+    # 4. считаем комиссию напрямую
+    calculator = CommissionCalculator(session, FakeBot())
+
+    import asyncio
+    asyncio.run(calculator.process_purchase(purchase))
+
+    # 5. проверяем комиссии
+    from database.models import Commission
+
+    commissions = session.query(Commission).all()
+
+    print("\n=== КОМИССИИ ===")
+
+    for c in commissions:
+        print(
+            f"partner_id={c.partner_id}, amount={c.amount}, level={c.level}"
         )
 
-        session.add(test_partner)
-        session.commit()
-        session.refresh(test_partner)
-
-        purchase = Purchase(
-            purchase_number=f"TEST-{uuid.uuid4().hex[:6]}",
-            partner_id=test_partner.id,
-            amount=1000,
-            currency="RUB",
-            status=OrderStatus.PAID
-        )
-
-        session.add(purchase)
-        session.commit()
-        session.refresh(purchase)
-
-        commission = Commission(
-            partner_id=me.id,
-            purchase_id=purchase.id,
-            source_partner_id=test_partner.id,
-            level=1,
-            rate=0.20,
-            base_amount=1000,
-            amount=200,
-            status=CommissionStatus.PENDING
-        )
-
-        session.add(commission)
-        session.commit()
-
-        if me.telegram_id:
-            await notify.notify_commission(
-                telegram_id=int(me.telegram_id),
-                amount=200,
-                level=1,
-                buyer_name=f"{test_partner.first_name} {test_partner.last_name}"
-            )
-
-    print("MLM TEST CREATED SUCCESSFULLY")
+    session.close()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

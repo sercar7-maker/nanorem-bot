@@ -1,47 +1,36 @@
-import logging
+import sys
+import os
 
-from telegram.ext import ApplicationBuilder
+# добавляем корень проекта
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+
+import logging
+from dotenv import load_dotenv
+from telegram.ext import Application
+
+# загрузка .env
+load_dotenv()
 
 from config import BOT_TOKEN
-from database.db import init_db, SessionLocal
-from scheduler import setup_scheduler
 from tg_handlers.handlers import setup_handlers
-from core.commission import CommissionCalculator
 
+
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class TelegramBot:
-    def __init__(self):
-        if not BOT_TOKEN:
-            raise ValueError("BOT_TOKEN is not set!")
+def main():
+    # создаём приложение
+    application = Application.builder().token(BOT_TOKEN).build()
 
-        self.application = (
-            ApplicationBuilder()
-            .token(BOT_TOKEN)
-            .connect_timeout(30)
-            .read_timeout(30)
-            .write_timeout(30)
-            .pool_timeout(30)
-            .build()
-        )
+    # подключаем handlers
+    setup_handlers(application)
 
-        self.bot = self.application.bot
+    logger.info("Бот запущен...")
 
-        self.db = SessionLocal()
-        self.commission_calculator = CommissionCalculator(
-            db=self.db,
-            bot=self.bot
-        )
+    # ВАЖНО: без asyncio.run
+    application.run_polling()
 
-    def run(self):
-        print(">>> BOT START <<<")
 
-        init_db()
-        setup_handlers(self.application)
-        self.scheduler = setup_scheduler()
-
-        self.application.run_polling(
-            drop_pending_updates=True,
-            close_loop=False
-        )
+if __name__ == "__main__":
+    main()

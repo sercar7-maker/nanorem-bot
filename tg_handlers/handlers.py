@@ -20,14 +20,28 @@ async def test_order(update, context):
     telegram_id = str(update.effective_user.id)
 
     try:
-        partner = (
+        # 👉 находим ТЕБЯ
+        you = (
             session.query(Partner)
             .filter(Partner.telegram_id == telegram_id)
             .first()
         )
 
-        if not partner:
+        if not you:
             await update.message.reply_text("Вы не зарегистрированы")
+            return
+
+        # 👉 находим любого партнёра ПОД ТОБОЙ
+        partner = (
+            session.query(Partner)
+            .filter(Partner.upline_id == you.id)
+            .first()
+        )
+
+        if not partner:
+            await update.message.reply_text(
+                "❌ Нет партнёров под вами для теста"
+            )
             return
 
         from web.order_handler import OrderHandler
@@ -40,7 +54,7 @@ async def test_order(update, context):
 
         order_data = {
             "id": "TEST123",
-            "partner_id": partner.id,
+            "partner_id": partner.id,  # 🔥 ВАЖНО: НЕ ты
             "total_amount": 1000
         }
 
@@ -48,7 +62,7 @@ async def test_order(update, context):
 
         if success:
             await update.message.reply_text(
-                "🎉 Новый человек успешно подписался и тестовый заказ обработан"
+                "🎉 Заказ от нижнего партнёра обработан"
             )
         else:
             await update.message.reply_text(
@@ -66,6 +80,12 @@ async def button_handler(update, context):
     text = update.message.text
     telegram_id = str(update.effective_user.id)
 
+    if text == "🌐 Сайт":
+        await update.message.reply_text(
+            "🌐 Перейдите для регистрации:\nhttps://nanorvs.ru/register"
+        )
+        return
+
     partner_service = PartnerService()
     session = SessionLocal()
 
@@ -73,7 +93,9 @@ async def button_handler(update, context):
 
     if not partner:
         await update.message.reply_text(
-            "Вы не зарегистрированы как партнёр."
+            "❌ Вы не зарегистрированы.\n\n"
+            "Перейдите на сайт для регистрации:\n"
+            "https://nanorvs.ru/register"
         )
         session.close()
         return
@@ -82,7 +104,7 @@ async def button_handler(update, context):
         balance = partner_service.get_partner_balance(partner.id)
 
         await update.message.reply_text(
-            f"Ваш баланс: {balance:.2f} ₽"
+            f"💰 Ваш баланс:\n\n{balance:.2f} ₽"
         )
 
     elif text == "👤 Профиль":
@@ -90,7 +112,8 @@ async def button_handler(update, context):
         rank = rank_service.calculate_rank(partner.id)
 
         await update.message.reply_text(
-            f"Партнёр ID: {partner.id}\n"
+            f"👤 Профиль\n\n"
+            f"ID: {partner.id}\n"
             f"Дата регистрации: {partner.registration_date}\n"
             f"Ранг: {rank}"
         )
@@ -100,11 +123,11 @@ async def button_handler(update, context):
 
         message = (
             "👥 Ваша сеть\n\n"
-            f"1 уровень — {levels[1]} партнёров\n"
-            f"2 уровень — {levels[2]} партнёров\n"
-            f"3 уровень — {levels[3]} партнёров\n"
-            f"4 уровень — {levels[4]} партнёров\n"
-            f"5 уровень — {levels[5]} партнёров\n\n"
+            f"1 уровень — {levels[1]}\n"
+            f"2 уровень — {levels[2]}\n"
+            f"3 уровень — {levels[3]}\n"
+            f"4 уровень — {levels[4]}\n"
+            f"5 уровень — {levels[5]}\n\n"
             f"Всего партнёров — {levels['total']}"
         )
 
@@ -114,7 +137,7 @@ async def button_handler(update, context):
         link_code = partner.telegram_link_code
 
         message = (
-            "🔗 Ваша реферальная ссылка:\n\n"
+            "🔗 Ваша ссылка\n\n"
             f"https://nanorvs.ru/register?ref={link_code}\n\n"
             "Приглашайте партнёров и зарабатывайте 💰"
         )
@@ -127,17 +150,20 @@ async def button_handler(update, context):
 
         message = (
             "📊 Ваша статистика\n\n"
-            f"Партнёров в сети: {stats['partners']}\n"
-            f"Всего комиссий: {stats['commission']:.2f} ₽\n"
-            f"Ваш баланс: {balance:.2f} ₽\n\n"
-            f"Личный оборот за месяц: {stats['personal_turnover']:.2f} ₽\n"
-            f"Оборот сети за месяц: {stats['network_turnover']:.2f} ₽"
+
+            "👥 Сеть\n"
+            f"Партнёров: {stats['partners']}\n\n"
+
+            "💰 Финансы\n"
+            f"Комиссия: {stats['commission']:.2f} ₽\n"
+            f"Баланс: {balance:.2f} ₽\n\n"
+
+            "📦 Оборот\n"
+            f"Личный: {stats['personal_turnover']:.2f} ₽\n"
+            f"Сеть: {stats['network_turnover']:.2f} ₽"
         )
 
         await update.message.reply_text(message)
-
-    elif text == "🌐 Сайт":
-        await update.message.reply_text("https://nanorvs.ru")
 
     session.close()
 
