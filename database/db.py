@@ -93,3 +93,9 @@ class DatabaseManager:
 
 # Singleton instance (legacy usage)
 db = DatabaseManager()
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

@@ -72,9 +72,10 @@ class CommissionCalculator:
 
         print("🚀 PROCESS PURCHASE CALLED")
 
-        # ❌ ВРЕМЕННО ОТКЛЮЧАЕМ ЭТУ ПРОВЕРКУ
-        # if purchase.is_commission_processed:
-        #     return
+        # 🔒 ЗАЩИТА ОТ ДУБЛЕЙ
+        if purchase.is_commission_processed:
+            print("⛔ commissions already processed")
+            return
 
         partner = (
             self.db.query(Partner)

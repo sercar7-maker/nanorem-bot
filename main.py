@@ -1,50 +1,12 @@
-#!/usr/bin/env python3
-"""NANOREM MLM System - Main Application Entry Point."""
+from fastapi import FastAPI
 
-import sys
-import logging
-from pathlib import Path
+from web.order_handler import router as order_router
 
-# Add project root to sys.path
-sys.path.insert(0, str(Path(__file__).parent))
+app = FastAPI()
 
-from config import BOT_TOKEN, DEBUG
-from tg_handlers.bot import TelegramBot
-from database.db import init_db
+app.include_router(order_router)
 
 
-def configure_logging(debug: bool = False) -> None:
-    """Set up logging configuration."""
-    level = logging.DEBUG if debug else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-
-
-def main() -> None:
-    """Main entry point for NANOREM MLM Bot."""
-    configure_logging(debug=DEBUG)
-    logger = logging.getLogger(__name__)
-
-    if not BOT_TOKEN:
-        logger.error("BOT_TOKEN is not configured. Set it in .env or config.py")
-        sys.exit(1)
-
-    logger.info("Initializing NANOREM MLM Telegram Bot...")
-
-    print(">>> DATABASE INIT START <<<")
-    init_db()
-
-    print("STEP 1")
-    bot = TelegramBot()
-
-    print("STEP 2")
-    bot.run()
-
-    print("STEP 3")
-
-
-if __name__ == "__main__":
-    main()
+@app.get("/")
+def root():
+    return {"status": "ok"}

@@ -6,16 +6,49 @@ from sqlalchemy import func
 
 class PartnerService:
 
-    def get_partner_by_telegram_id(self, telegram_id: int):
+    def create_partner(self, telegram_id: str, upline_id: int = None):
         session = SessionLocal()
 
-        print(f"🔍 SEARCH telegram_id={telegram_id} ({type(telegram_id)})")
+        try:
+            lineage = []
+
+            # 👉 если есть аплайн — строим lineage
+            if upline_id:
+                upline = session.query(Partner).filter(
+                    Partner.id == upline_id
+                ).first()
+
+                if upline:
+                    # берём lineage аплайна и добавляем его самого
+                    lineage = list(upline.lineage or [])
+                    lineage.insert(0, upline.id)
+
+            partner = Partner(
+                telegram_id=telegram_id,
+                upline_id=upline_id,
+                lineage=lineage,
+                status="ACTIVE",
+                role="partner",
+                rank="Partner"
+            )
+
+            session.add(partner)
+            session.commit()
+            session.refresh(partner)
+
+            print(f"✅ CREATED partner {partner.id} with lineage {partner.lineage}")
+
+            return partner
+
+        finally:
+            session.close()
+
+    def get_partner_by_telegram_id(self, telegram_id: int):
+        session = SessionLocal()
 
         partner = session.query(Partner).filter(
             Partner.telegram_id == telegram_id
         ).first()
-
-        print(f"👉 FOUND partner={partner}")
 
         session.close()
         return partner
@@ -35,13 +68,6 @@ class PartnerService:
     def get_network_levels(self, partner_id: int):
         session = SessionLocal()
 
-        print(f"🔍 NETWORK for partner_id={partner_id}")
-
-        all_partners = session.query(Partner).all()
-        print("ВСЕ В БАЗЕ:")
-        for p in all_partners:
-            print(f"ID={p.id}, upline_id={p.upline_id}")
-
         levels = {
             1: 0,
             2: 0,
@@ -54,8 +80,6 @@ class PartnerService:
             level_1 = session.query(Partner).filter(
                 Partner.upline_id == partner_id
             ).all()
-
-            print(f"LEVEL 1 RAW: {[p.id for p in level_1]}")
 
             levels[1] = len(level_1)
 

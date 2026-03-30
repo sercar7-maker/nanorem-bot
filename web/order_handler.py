@@ -1,96 +1,70 @@
-import logging
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
-from telegram import Bot
+from database.db import get_db
+from database.models import Purchase, OrderStatus
+from core.commission import CommissionCalculator
+from services.partner_service import PartnerService
 
-from config import BOT_TOKEN
-from core.network import NetworkManager
-from database.db import SessionLocal
-from database.models import Partner, Purchase, OrderStatus
-from services.rank_service import RankService
-from services.stats_service import StatsService
-from web.api_client import NanorvsAPIClient
-
-logger = logging.getLogger(__name__)
+router = APIRouter()
 
 
-class OrderHandler:
-    def __init__(
-        self,
-        api_client: NanorvsAPIClient,
-        commission_calculator
-    ):
-        self.api_client = api_client
-        self.commission_calculator = commission_calculator
-        self.network_manager = NetworkManager()
-        self.bot = Bot(token=BOT_TOKEN)
+@router.get("/ping")
+def ping():
+    return {"status": "ok"}
 
-        logger.info("Initialized OrderHandler")
 
-    async def process_order(self, order_data: dict):
-        session = SessionLocal()
+@router.post("/create-partner")
+def create_partner(
+    telegram_id: str,
+    upline_id: int = None
+):
+    service = PartnerService()
 
-        try:
-            print("🚀 ORDER START")
+    partner = service.create_partner(
+        telegram_id=telegram_id,
+        upline_id=upline_id
+    )
 
-            order_id = order_data["id"]
-            partner_id = order_data["partner_id"]
-            amount = float(order_data["total_amount"])
+    return {
+        "id": partner.id,
+        "lineage": partner.lineage
+    }
 
-            purchase = session.query(Purchase).filter_by(ext_ref=str(order_id)).first()
 
-            if not purchase:
-                print("📦 creating purchase")
+@router.post("/test-order")
+async def test_order(
+    partner_id: int,
+    amount: float,
+    db: Session = Depends(get_db)
+):
+    # 🔒 ищем любой заказ этого партнёра с такой суммой
+    existing = db.query(Purchase).filter(
+        Purchase.partner_id == partner_id,
+        Purchase.amount == amount
+    ).first()
 
-                purchase = Purchase(
-                    purchase_number=str(order_id),
-                    partner_id=partner_id,
-                    amount=amount,
-                    status=OrderStatus.PAID,
-                    ext_ref=str(order_id),
-                )
-                session.add(purchase)
-                session.commit()
-                session.refresh(purchase)
+    if existing:
+        return {
+            "status": "already exists",
+            "purchase_id": existing.id
+        }
 
-            print(f"📦 PURCHASE ID: {purchase.id}")
+    purchase = Purchase(
+        purchase_number=f"TEST-{partner_id}-{amount}",
+        partner_id=partner_id,
+        amount=amount,
+        status=OrderStatus.PAID,
+    )
 
-            # 🔥 ВАЖНО
-            print("👉 CALLING COMMISSION CALCULATOR")
+    db.add(purchase)
+    db.commit()
+    db.refresh(purchase)
 
-            self.commission_calculator.session = session
+    calculator = CommissionCalculator(db, bot=None)
+    await calculator.process_purchase(purchase)
 
-            await self.commission_calculator.process_purchase(purchase)
-
-            print("✅ COMMISSION CALCULATOR CALLED")
-
-            session.commit()
-
-            stats_service = StatsService(session)
-            stats_service.process_purchase(
-                partner_id=partner_id,
-                amount=amount
-            )
-
-            partner = session.query(Partner).filter(Partner.id == partner_id).first()
-            if partner:
-                rank_service = RankService(session)
-                await rank_service.process_rank(partner)
-
-            self.api_client.update_partner_sales(
-                partner_id,
-                {
-                    "order_id": order_id,
-                    "amount": amount,
-                }
-            )
-
-            logger.info(f"Successfully processed order {order_id}")
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to process order: {e}")
-            print(f"❌ ERROR: {e}")
-            return False
-
-        finally:
-            session.close()
+    return {
+        "status": "ok",
+        "purchase_id": purchase.id
+    }
