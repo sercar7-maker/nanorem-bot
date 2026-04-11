@@ -67,8 +67,7 @@ class PartnerService:
             if existing_count < 2:
                 upline_id = None
             elif not upline_id:
-                root_id = self.choose_root(session)
-                upline_id = self.find_best_upline(session, root_id)
+                upline_id = self.choose_root(session) 
 
             lineage = []
 
