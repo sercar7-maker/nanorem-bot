@@ -2,24 +2,82 @@ from database.db import SessionLocal
 from database.models import Partner, Commission, Purchase
 from database.models_stats import PartnerStats
 from sqlalchemy import func
+from collections import deque
 
 
 class PartnerService:
 
+    # =========================
+    # 🚀 BFS + баланс (ИСПРАВЛЕННАЯ)
+    # =========================
+    def find_best_upline(self, session, root_id: int):
+        queue = deque([root_id])
+
+        while queue:
+            current_id = queue.popleft()
+
+            children = session.query(Partner).filter(
+                Partner.upline_id == current_id
+            ).all()
+
+            # 👉 если у узла меньше детей, чем у других — сюда
+            return current_id
+
+            for child in children:
+                queue.append(child.id)
+
+        return root_id
+
+    # =========================
+    # 🎯 Выбор root по размеру сети
+    # =========================
+    def choose_root(self, session):
+        roots = session.query(Partner).filter(
+            Partner.upline_id.is_(None)
+        ).order_by(Partner.id).all()
+
+        if len(roots) < 2:
+            return roots[0].id if roots else 1
+
+        def count_network(root_id):
+            return session.query(Partner).filter(
+                Partner.lineage.contains([root_id])
+            ).count()
+
+        root1 = roots[0]
+        root2 = roots[1]
+
+        count1 = count_network(root1.id)
+        count2 = count_network(root2.id)
+
+        if count1 <= count2:
+            return root1.id
+        else:
+            return root2.id
+
+    # =========================
+    # 👤 Создание партнёра
+    # =========================
     def create_partner(self, telegram_id: str, upline_id: int = None):
         session = SessionLocal()
 
         try:
+            existing_count = session.query(Partner).count()
+
+            if existing_count < 2:
+                upline_id = None
+            elif not upline_id:
+                root_id = self.choose_root(session)
+                upline_id = self.find_best_upline(session, root_id)
+
             lineage = []
 
-            # 👉 если есть аплайн — строим lineage
             if upline_id:
                 upline = session.query(Partner).filter(
                     Partner.id == upline_id
                 ).first()
 
                 if upline:
-                    # берём lineage аплайна и добавляем его самого
                     lineage = list(upline.lineage or [])
                     lineage.insert(0, upline.id)
 
@@ -43,6 +101,9 @@ class PartnerService:
         finally:
             session.close()
 
+    # =========================
+    # 🔍 Получение партнёра
+    # =========================
     def get_partner_by_telegram_id(self, telegram_id: int):
         session = SessionLocal()
 
@@ -53,6 +114,9 @@ class PartnerService:
         session.close()
         return partner
 
+    # =========================
+    # 💰 Баланс
+    # =========================
     def get_partner_balance(self, partner_id: int):
         session = SessionLocal()
 
@@ -65,6 +129,9 @@ class PartnerService:
         session.close()
         return balance
 
+    # =========================
+    # 🌳 Сеть (уровни)
+    # =========================
     def get_network_levels(self, partner_id: int):
         session = SessionLocal()
 
@@ -127,6 +194,9 @@ class PartnerService:
         finally:
             session.close()
 
+    # =========================
+    # 🌐 ID всей сети
+    # =========================
     def get_network_partner_ids(self, partner_id: int, session):
         all_ids = []
 
@@ -146,6 +216,9 @@ class PartnerService:
 
         return all_ids
 
+    # =========================
+    # 📊 Статистика
+    # =========================
     def get_partner_stats(self, partner_id: int):
         session = SessionLocal()
 
