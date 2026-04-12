@@ -8,27 +8,6 @@ from collections import deque
 class PartnerService:
 
     # =========================
-    # 🚀 BFS + баланс (ИСПРАВЛЕННАЯ)
-    # =========================
-    def find_best_upline(self, session, root_id: int):
-        queue = deque([root_id])
-
-        while queue:
-            current_id = queue.popleft()
-
-            children = session.query(Partner).filter(
-                Partner.upline_id == current_id
-            ).all()
-
-            # 👉 если у узла меньше детей, чем у других — сюда
-            return current_id
-
-            for child in children:
-                queue.append(child.id)
-
-        return root_id
-
-    # =========================
     # 🎯 Выбор root по размеру сети
     # =========================
     def choose_root(self, session):
@@ -67,7 +46,7 @@ class PartnerService:
             if existing_count < 2:
                 upline_id = None
             elif not upline_id:
-                upline_id = self.choose_root(session) 
+                upline_id = self.choose_root(session)
 
             lineage = []
 
@@ -92,6 +71,28 @@ class PartnerService:
             session.add(partner)
             session.commit()
             session.refresh(partner)
+
+            # 🔥 НОВОЕ: Обновляем team_size у всех предков
+            for upline_id in lineage:
+                stats = session.query(PartnerStats).filter(
+                    PartnerStats.partner_id == upline_id
+                ).first()
+                
+                if not stats:
+                    stats = PartnerStats(
+                        partner_id=upline_id,
+                        personal_turnover=0,
+                        network_turnover=0,
+                        monthly_personal_turnover=0,
+                        monthly_network_turnover=0,
+                        team_size=0
+                    )
+                    session.add(stats)
+                    session.flush()
+                
+                stats.team_size += 1
+            
+            session.commit()
 
             print(f"✅ CREATED partner {partner.id} with lineage {partner.lineage}")
 
