@@ -91,7 +91,7 @@ class CommissionCalculator:
 
         print(f"🌳 LINEAGE: {lineage}")
 
-        upline_chain = [(pid, True) for pid in reversed(lineage)]
+        upline_chain = [(pid, True) for pid in lineage]
 
         results = self.calculate_purchase_commissions(
             purchase_amount=Decimal(str(purchase.amount)),
