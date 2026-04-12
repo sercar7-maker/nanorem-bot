@@ -9,16 +9,18 @@ def run_test():
 
     try:
         # 👉 создаём 6 пользователей БЕЗ реферала
-        for i in range(1001, 1007):
-            p = service.create_partner(telegram_id=i)
+        for i in range(2001, 2007):  # ← ИЗМЕНИЛИ НА 2001-2006
+            p = service.create_partner(telegram_id=str(i))  # ← ПРИВЕЛИ К СТРОКЕ
             print(f"created: {p.id} -> upline {p.upline_id}")
 
         print("\n--- STRUCTURE ---")
 
-        partners = session.query(Partner).all()
+        partners = session.query(Partner).filter(
+            Partner.telegram_id.in_([str(i) for i in range(2001, 2007)])
+        ).all()
 
         for p in partners:
-            print(f"id={p.id}, upline={p.upline_id}")
+            print(f"id={p.id}, telegram_id={p.telegram_id}, upline={p.upline_id}")
 
     finally:
         session.close()
