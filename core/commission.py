@@ -122,6 +122,25 @@ class CommissionCalculator:
 
             self.commission_service.approve_commission(commission)
 
+            # 🔔 НОВОЕ: Отправляем уведомление получателю комиссии
+            if self.notify and self.notify.bot:
+                try:
+                    # Получаем telegram_id получателя
+                    recipient = self.db.query(Partner).filter(
+                        Partner.id == res.partner_id
+                    ).first()
+                    
+                    if recipient and recipient.telegram_id:
+                        buyer_name = partner.first_name or partner.username or str(partner.id)
+                        await self.notify.notify_commission(
+                            telegram_id=int(recipient.telegram_id),
+                            amount=float(res.amount),
+                            level=res.level,
+                            buyer_name=buyer_name
+                        )
+                except Exception as e:
+                    print(f"⚠️ Failed to send notification: {e}")
+
         purchase.is_commission_processed = True
 
         self.db.commit()
