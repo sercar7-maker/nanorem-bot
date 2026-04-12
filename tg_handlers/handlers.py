@@ -41,21 +41,21 @@ async def test_order(update, context):
     session = SessionLocal()
 
     try:
-        # 👉 находим ТЕБЯ
-        you = (
+        # 👉 находим покупателя (текущий пользователь)
+        buyer = (
             session.query(Partner)
             .filter(Partner.telegram_id == telegram_id)
             .first()
         )
 
-        if not you:
+        if not buyer:
             await update.message.reply_text("Вы не зарегистрированы")
             return
 
-        # 👉 находим любого партнёра ПОД ТОБОЙ
+        # 👉 находим любого партнёра ПОД покупателем
         partner = (
             session.query(Partner)
-            .filter(Partner.upline_id == you.id)
+            .filter(Partner.upline_id == buyer.id)
             .first()
         )
 
@@ -65,30 +65,34 @@ async def test_order(update, context):
             )
             return
 
-        from web.order_handler import OrderHandler
-        from web.api_client import NanorvsAPIClient
+        # Импортируем нужные модели и калькулятор
+        from database.models import Purchase, OrderStatus
         from core.commission import CommissionCalculator
+        
+        # Создаём тестовую покупку
+        purchase = Purchase(
+            purchase_number=f"TEST-{partner.id}-1000",
+            partner_id=partner.id,
+            amount=1000.0,
+            status=OrderStatus.PAID,
+        )
+        session.add(purchase)
+        session.commit()
+        session.refresh(purchase)
 
-        api_client = NanorvsAPIClient()
+        # Запускаем расчёт комиссий
         calculator = CommissionCalculator(session, context.bot)
-        handler = OrderHandler(api_client, calculator)
+        await calculator.process_purchase(purchase)
 
-        order_data = {
-            "id": "TEST123",
-            "partner_id": partner.id,  # 🔥 ВАЖНО: НЕ ты
-            "total_amount": 1000
-        }
+        await update.message.reply_text(
+            "🎉 Заказ от нижнего партнёра обработан"
+        )
 
-        success = await handler.process_order(order_data)
-
-        if success:
-            await update.message.reply_text(
-                "🎉 Заказ от нижнего партнёра обработан"
-            )
-        else:
-            await update.message.reply_text(
-                "❌ Ошибка при обработке тестового заказа"
-            )
+    except Exception as e:
+        print(f"❌ Ошибка в test_order: {e}")
+        import traceback
+        traceback.print_exc()
+        await update.message.reply_text(f"❌ Ошибка: {e}")
 
     finally:
         session.close()
