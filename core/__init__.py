@@ -1,11 +1,9 @@
 """NANOREM MLM Core Module - Main business logic"""
 
-from .partner_manager import PartnerManager
 from .commission import CommissionCalculator
-from .network import NetworkManager
+from .balance_service import BalanceService
 
 __all__ = [
-    'PartnerManager',
     'CommissionCalculator',
-    'NetworkManager',
+    'BalanceService',
 ]
