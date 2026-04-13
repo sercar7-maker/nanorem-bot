@@ -195,10 +195,8 @@ def setup_handlers(application):
     logger.info("Registering Telegram handlers")
 
     from tg_handlers.start import get_handler as start_handler
-    from tg_handlers.balance import get_handler as balance_handler
 
     application.add_handler(start_handler())
-    application.add_handler(balance_handler())
 
     application.add_handler(CommandHandler("test_order", test_order))
     application.add_handler(
