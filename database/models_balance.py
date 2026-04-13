@@ -79,6 +79,10 @@ class BalanceTransaction(Base):
 
     description = Column(String)
 
+    # 🔥 НОВЫЕ ПОЛЯ
+    reference_id = Column(Integer, nullable=True)
+    external_id = Column(String, nullable=True)
+
     created_at = Column(
         DateTime,
         server_default=func.now()

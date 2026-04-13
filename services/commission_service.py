@@ -1,7 +1,9 @@
 from sqlalchemy.orm import Session
+from decimal import Decimal
 
 from database.models import Commission, CommissionStatus
-from services.balance_service import BalanceService
+from database.models_balance import BalanceTransactionType
+from core.balance_service import BalanceService
 
 
 class CommissionService:
@@ -17,10 +19,10 @@ class CommissionService:
 
         commission.status = CommissionStatus.APPROVED
 
-        self.balance_service.add_commission(
+        self.balance_service.add_funds(
             partner_id=commission.partner_id,
-            amount=commission.amount,
-            source=f"commission:{commission.id}"
+            amount=Decimal(str(commission.amount)),
+            tx_type=BalanceTransactionType.COMMISSION
         )
 
         self.session.commit()
