@@ -55,6 +55,15 @@ WEBHOOK_URL: str | None = os.getenv("WEBHOOK_URL")
 WEBHOOK_PORT: int = int(os.getenv("WEBHOOK_PORT", "8443"))
 
 # ====================================
+# WOOCOMMERCE API CONFIGURATION
+# ====================================
+
+# WooCommerce REST API keys (from nanorvs.ru admin panel)
+WC_CONSUMER_KEY: str | None = os.getenv("WC_CONSUMER_KEY")
+WC_CONSUMER_SECRET: str | None = os.getenv("WC_CONSUMER_SECRET")
+WC_API_BASE_URL: str = os.getenv("WC_API_BASE_URL", "https://nanorvs.ru/wp-json/wc/v3")
+
+# ====================================
 # MLM CONFIGURATION
 # ====================================
 

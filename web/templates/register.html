@@ -1,32 +1,175 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
+
 <head>
-    <title>NANOREM Registration</title>
-    <meta charset="utf-8">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Регистрация партнёра NANOREM</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 40px auto;
+            padding: 20px;
+        }
+
+        h2 {
+            color: #333;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        input[type="text"],
+        input[type="email"],
+        input[type="tel"] {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
+        .consent-text {
+            border: 1px solid #ccc;
+            padding: 10px;
+            max-height: 200px;
+            overflow-y: scroll;
+            background: #f9f9f9;
+            margin-bottom: 10px;
+            font-size: 14px;
+            color: #555;
+        }
+
+        .consent-checkbox {
+            font-size: 14px;
+            margin: 15px 0;
+        }
+
+        .consent-checkbox input {
+            margin-right: 8px;
+        }
+
+        .register-btn {
+            padding: 12px 24px;
+            background: #2AABEE;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        .register-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .error-message {
+            color: red;
+            font-size: 13px;
+            margin-top: 5px;
+        }
+    </style>
 </head>
+
 <body>
+    <h2>Регистрация партнёра NANOREM</h2>
 
-<h2>Регистрация партнёра NANOREM</h2>
+    <form id="registrationForm" action="/register" method="POST">
 
-<form method="post" action="/register">
+        <!-- Поля пользователя -->
+        <div class="form-group">
+            <label for="first_name">Имя *</label>
+            <input type="text" id="first_name" name="first_name" required placeholder="Сергей">
+        </div>
 
-    <label>Имя:</label><br>
-    <input type="text" name="first_name" required><br><br>
+        <div class="form-group">
+            <label for="last_name">Фамилия *</label>
+            <input type="text" id="last_name" name="last_name" required placeholder="Царик">
+        </div>
 
-    <label>Фамилия:</label><br>
-    <input type="text" name="last_name" required><br><br>
+        <div class="form-group">
+            <label for="email">Email *</label>
+            <input type="email" id="email" name="email" required placeholder="sercar7@gmail.com">
+        </div>
 
-    <label>Email:</label><br>
-    <input type="email" name="email" required><br><br>
+        <div class="form-group">
+            <label for="phone">Телефон *</label>
+            <input type="tel" id="phone" name="phone" required placeholder="+79275148553">
+        </div>
 
-    <label>Телефон:</label><br>
-    <input type="text" name="phone" required><br><br>
+        <!-- Скрытое поле для реферала -->
+        <input type="hidden" name="ref" value="{{ ref }}">
 
-    <input type="hidden" name="ref" value="{{ ref if ref else 1 }}">
+        <!-- Согласие на обработку ПД (полный текст) -->
+        <h3>Согласие на обработку персональных данных</h3>
+        <div class="consent-text" id="consentText">
+            <p><strong>СОГЛАСИЕ НА ОБРАБОТКУ ПЕРСОНАЛЬНЫХ ДАННЫХ</strong></p>
+            <p>Я, субъект персональных данных, действуя свободно, своей волей и в своём интересе, даю согласие ИП [Ваше
+                ФИО] (ИНН [Ваш ИНН]), зарегистрированному по адресу: [Ваш адрес], на обработку моих персональных данных
+                на следующих условиях:</p>
+            <p><strong>1. ПЕРЕЧЕНЬ ДАННЫХ:</strong></p>
+            <ul>
+                <li>Фамилия, имя, отчество (при наличии)</li>
+                <li>Номер телефона</li>
+                <li>Email</li>
+                <li>Telegram ID / username (при привязке)</li>
+            </ul>
+            <p><strong>2. ЦЕЛИ ОБРАБОТКИ:</strong></p>
+            <ul>
+                <li>Регистрация в партнёрской программе NANOREM MLM</li>
+                <li>Начисление и выплата партнёрского вознаграждения</li>
+                <li>Отображение структуры сети (уровни, обороты)</li>
+                <li>Информирование о начислениях, статусах, событиях в сети</li>
+                <li>Соблюдение требований законодательства РФ</li>
+            </ul>
+            <p><strong>3. ДЕЙСТВИЯ С ДАННЫМИ:</strong> Сбор, запись, систематизация, накопление, хранение, уточнение
+                (обновление, изменение), извлечение, использование, передача (исключительно внутри партнёрской сети для
+                расчёта вознаграждений), блокирование, удаление, уничтожение.</p>
+            <p><strong>4. СРОК ДЕЙСТВИЯ:</strong> Согласие действует в течение всего срока участия в партнёрской
+                программе и в течение 3 лет после его прекращения.</p>
+            <p><strong>5. ОТЗЫВ СОГЛАСИЯ:</strong> Согласие может быть отозвано путём направления письменного заявления
+                на электронную почту: [Ваш email]. В случае отзыва согласия участие в партнёрской программе
+                прекращается.</p>
+        </div>
 
-    <button type="submit">Зарегистрироваться</button>
+        <!-- Чекбокс согласия -->
+        <div class="consent-checkbox">
+            <input type="checkbox" id="consent" name="consent" required>
+            <label for="consent">Я даю согласие на обработку моих персональных данных на условиях, указанных выше
+                *</label>
+        </div>
 
-</form>
+        <!-- Кнопка регистрации (изначально заблокирована) -->
+        <button type="submit" id="registerButton" class="register-btn" disabled>Зарегистрироваться</button>
+    </form>
 
+    <script>
+        const form = document.getElementById('registrationForm');
+        const consent = document.getElementById('consent');
+        const button = document.getElementById('registerButton');
+
+        // Активируем кнопку только при согласии
+        consent.addEventListener('change', function () {
+            button.disabled = !this.checked;
+        });
+
+        // Дополнительная проверка перед отправкой
+        form.addEventListener('submit', function (e) {
+            if (!consent.checked) {
+                e.preventDefault();
+                alert('Необходимо дать согласие на обработку персональных данных!');
+            }
+        });
+    </script>
 </body>
+
 </html>

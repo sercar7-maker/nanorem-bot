@@ -1,179 +1,148 @@
-"""API Client for nanorvs.ru website integration."""
-
+"""
+API Client for nanorvs.ru WooCommerce integration.
+Uses query string authentication (consumer_key & consumer_secret in URL).
+"""
 import logging
 import requests
+import json
 from typing import Dict, List, Optional, Any
-from datetime import datetime
+from urllib.parse import urljoin
+
+from config import WC_CONSUMER_KEY, WC_CONSUMER_SECRET, WC_API_BASE_URL
 
 logger = logging.getLogger(__name__)
 
 
 class NanorvsAPIClient:
-    """Client for interacting with nanorvs.ru API."""
-    
-    def __init__(self, base_url: str = "https://nanorvs.ru", api_key: Optional[str] = None):
-        """Initialize API client.
-        
-        Args:
-            base_url: Base URL for nanorvs.ru
-            api_key: API key for authentication (if required)
+    """Client for interacting with nanorvs.ru WooCommerce API."""
+
+    def __init__(
+        self,
+        base_url: str = WC_API_BASE_URL,
+        consumer_key: Optional[str] = WC_CONSUMER_KEY,
+        consumer_secret: Optional[str] = WC_CONSUMER_SECRET,
+    ):
         """
-        self.base_url = base_url.rstrip('/')
-        self.api_key = api_key
+        Initialize API client.
+
+        Args:
+            base_url: Base URL for WooCommerce REST API (e.g., https://nanorvs.ru/wp-json/wc/v3)
+            consumer_key: WooCommerce Consumer Key
+            consumer_secret: WooCommerce Consumer Secret
+        """
+        self.base_url = base_url.rstrip("/")
+        self.consumer_key = consumer_key
+        self.consumer_secret = consumer_secret
         self.session = requests.Session()
-        
-        if api_key:
-            self.session.headers.update({
-                'Authorization': f'Bearer {api_key}',
-                'Content-Type': 'application/json'
-            })
-        
-        logger.info(f"Initialized NanorvsAPIClient for {base_url}")
-    
-    def get_products(self, category: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Get product catalog from nanorvs.ru.
-        
-        Args:
-            category: Optional category filter
-            
-        Returns:
-            List of products with details
-        """
-        try:
-            endpoint = f"{self.base_url}/api/products"
+        # Добавляем заголовки, имитирующие браузер
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Accept-Encoding": "gzip, deflate, br",
+        })
+        logger.info(f"Initialized NanorvsAPIClient for {base_url} (using query auth)")
+
+    def _request(
+        self,
+        method: str,
+        endpoint: str,
+        params: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Internal method to perform authenticated requests."""
+        url = urljoin(self.base_url + "/", endpoint.lstrip("/"))
+
+        if params is None:
             params = {}
-            if category:
-                params['category'] = category
-            
-            response = self.session.get(endpoint, params=params, timeout=10)
-            response.raise_for_status()
-            
-            products = response.json()
-            logger.info(f"Retrieved {len(products)} products from nanorvs.ru")
-            return products
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to get products: {e}")
-            return []
-    
-    def get_product_details(self, product_id: str) -> Optional[Dict[str, Any]]:
-        """Get detailed information about specific product.
-        
-        Args:
-            product_id: Product identifier
-            
-        Returns:
-            Product details or None if not found
-        """
+
+        # Добавляем ключи в параметры URL
+        if self.consumer_key and self.consumer_secret:
+            params["consumer_key"] = self.consumer_key
+            params["consumer_secret"] = self.consumer_secret
+
         try:
-            endpoint = f"{self.base_url}/api/products/{product_id}"
-            response = self.session.get(endpoint, timeout=10)
+            if method.upper() == "GET":
+                response = self.session.get(url, params=params, timeout=15)
+            else:
+                response = self.session.request(
+                    method=method, url=url, params=params, json=data, timeout=15
+                )
+
             response.raise_for_status()
-            
-            product = response.json()
-            logger.info(f"Retrieved details for product {product_id}")
-            return product
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to get product {product_id}: {e}")
+
+            if response.status_code == 204:
+                return {"success": True}
+
+            # Убираем BOM (Byte Order Mark), если он есть
+            text = response.text
+            if text.startswith('\ufeff'):
+                text = text[1:]
+            return json.loads(text)
+
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"HTTP error calling {endpoint}: {e}")
+            if e.response is not None:
+                logger.error(f"Response body: {e.response.text}")
             return None
-    
-    def create_order(self, order_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Create new order on nanorvs.ru.
-        
-        Args:
-            order_data: Order information (items, customer, etc.)
-            
-        Returns:
-            Created order details or None if failed
-        """
-        try:
-            endpoint = f"{self.base_url}/api/orders"
-            response = self.session.post(endpoint, json=order_data, timeout=10)
-            response.raise_for_status()
-            
-            order = response.json()
-            logger.info(f"Created order {order.get('id')}")
-            return order
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to create order: {e}")
+        except Exception as e:
+            logger.error(f"Error calling {endpoint}: {e}")
             return None
-    
-    def get_order_status(self, order_id: str) -> Optional[Dict[str, Any]]:
-        """Get order status from nanorvs.ru.
-        
-        Args:
-            order_id: Order identifier
-            
-        Returns:
-            Order status information
-        """
-        try:
-            endpoint = f"{self.base_url}/api/orders/{order_id}"
-            response = self.session.get(endpoint, timeout=10)
-            response.raise_for_status()
-            
-            order = response.json()
-            logger.info(f"Retrieved status for order {order_id}")
-            return order
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to get order {order_id}: {e}")
-            return None
-    
-    def update_partner_sales(self, partner_id: str, sale_data: Dict[str, Any]) -> bool:
-        """Report partner sale to nanorvs.ru system.
-        
-        Args:
-            partner_id: Partner identifier
-            sale_data: Sale information
-            
-        Returns:
-            True if successful
-        """
-        try:
-            endpoint = f"{self.base_url}/api/partners/{partner_id}/sales"
-            response = self.session.post(endpoint, json=sale_data, timeout=10)
-            response.raise_for_status()
-            
-            logger.info(f"Reported sale for partner {partner_id}")
-            return True
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to report sale: {e}")
-            return False
-    
-    def get_partner_stats(self, partner_id: str) -> Optional[Dict[str, Any]]:
-        """Get partner statistics from nanorvs.ru.
-        
-        Args:
-            partner_id: Partner identifier
-            
-        Returns:
-            Partner statistics
-        """
-        try:
-            endpoint = f"{self.base_url}/api/partners/{partner_id}/stats"
-            response = self.session.get(endpoint, timeout=10)
-            response.raise_for_status()
-            
-            stats = response.json()
-            logger.info(f"Retrieved stats for partner {partner_id}")
-            return stats
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to get partner stats: {e}")
-            return None
-    
+
+    # ----------------------------------------------------------------------
+    # Customers (Partners)
+    # ----------------------------------------------------------------------
+    def get_customers(self, **filters) -> List[Dict[str, Any]]:
+        """Get list of customers (partners) with optional filters."""
+        params = {"per_page": 100, **filters}
+        return self._request("GET", "customers", params=params) or []
+
+    def get_customer(self, customer_id: int) -> Optional[Dict[str, Any]]:
+        """Get single customer by ID."""
+        return self._request("GET", f"customers/{customer_id}")
+
+    def get_customer_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        """Find customer by email."""
+        customers = self.get_customers(email=email)
+        return customers[0] if customers else None
+
+    # ----------------------------------------------------------------------
+    # Orders
+    # ----------------------------------------------------------------------
+    def get_orders(self, **filters) -> List[Dict[str, Any]]:
+        """Get list of orders with optional filters."""
+        params = {"per_page": 100, **filters}
+        return self._request("GET", "orders", params=params) or []
+
+    def get_order(self, order_id: int) -> Optional[Dict[str, Any]]:
+        """Get single order by ID."""
+        return self._request("GET", f"orders/{order_id}")
+
+    def get_order_by_number(self, order_number: str) -> Optional[Dict[str, Any]]:
+        """Get order by order number (e.g., '#1234')."""
+        clean_number = order_number.lstrip("#")
+        orders = self.get_orders(number=clean_number)
+        return orders[0] if orders else None
+
+    # ----------------------------------------------------------------------
+    # Products
+    # ----------------------------------------------------------------------
+    def get_products(self, **filters) -> List[Dict[str, Any]]:
+        """Get product catalog."""
+        params = {"per_page": 100, **filters}
+        return self._request("GET", "products", params=params) or []
+
+    def get_product(self, product_id: int) -> Optional[Dict[str, Any]]:
+        """Get single product by ID."""
+        return self._request("GET", f"products/{product_id}")
+
+    # ----------------------------------------------------------------------
+    # Utility
+    # ----------------------------------------------------------------------
     def check_connection(self) -> bool:
-        """Check connection to nanorvs.ru.
-        
-        Returns:
-            True if connection successful
-        """
+        """Check connection to WooCommerce API."""
         try:
-            response = self.session.get(f"{self.base_url}/api/health", timeout=5)
-            return response.status_code == 200
-        except:
+            response = self._request("GET", "system_status")
+            return response is not None
+        except Exception:
             return False

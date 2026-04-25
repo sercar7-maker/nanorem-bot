@@ -15,53 +15,68 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = user.username
     first_name = user.first_name
 
-    code = context.args[0] if context.args else None
+    # Извлекаем код из текста сообщения напрямую
+    code = None
+    if update.message and update.message.text:
+        parts = update.message.text.strip().split()
+        if len(parts) > 1:
+            code = parts[1]
 
     session = SessionLocal()
+    partner = None
 
     # -------------------------------------------------
-    # ПРОВЕРЯЕМ: УЖЕ ПРИВЯЗАН?
+    # ШАГ 1: ПРИВЯЗКА ПО КОДУ (если код передан)
     # -------------------------------------------------
+    if code:
+        partner = session.query(Partner).filter(
+            Partner.telegram_link_code == code
+        ).first()
 
-    partner = session.query(Partner).filter(
-        Partner.telegram_id == telegram_id
-    ).first()
+        if partner:
+            # Проверяем, не привязан ли уже этот код к другому Telegram
+            if partner.telegram_id and partner.telegram_id != telegram_id:
+                text = "❌ Этот код уже привязан к другому Telegram."
+                session.close()
+                await update.message.reply_text(text)
+                return
 
-    if partner:
-        text = "👋 Добро пожаловать обратно!"
+            # Привязываем Telegram к партнёру
+            partner.telegram_id = telegram_id
+            partner.username = username
+            partner.first_name = first_name
+            partner.status = PartnerStatus.ACTIVE
+            session.commit()
 
-    else:
-        # -------------------------------------------------
-        # ПРИВЯЗКА ПО КОДУ (ТОЛЬКО САЙТ СОЗДАЁТ ПАРТНЁРА)
-        # -------------------------------------------------
-
-        if code:
-            partner = session.query(Partner).filter(
-                Partner.telegram_link_code == code
-            ).first()
-
-            if partner:
-                partner.telegram_id = telegram_id
-                partner.username = username
-                partner.first_name = first_name
-                partner.status = PartnerStatus.ACTIVE
-
-                session.commit()
-
-                text = "✅ Telegram успешно привязан!"
-
-            else:
-                text = "❌ Неверный код. Зарегистрируйтесь на сайте."
-
+            text = "✅ Telegram успешно привязан!"
         else:
-            text = "❌ Вы не зарегистрированы. Пройдите регистрацию на сайте."
+            text = "❌ Неверный код. Зарегистрируйтесь на сайте."
+            session.close()
+            await update.message.reply_text(text)
+            return
+
+    # -------------------------------------------------
+    # ШАГ 2: ПРОВЕРЯЕМ, УЖЕ ПРИВЯЗАН?
+    # -------------------------------------------------
+    if not partner:
+        partner = session.query(Partner).filter(
+            Partner.telegram_id == telegram_id
+        ).first()
+
+        if partner:
+            text = "👋 Добро пожаловать обратно!"
+        else:
+            text = (
+                "❌ Вы не зарегистрированы.\n\n"
+                "Перейдите на сайт для регистрации:\n"
+                "https://nanorvs.ru/register"
+            )
 
     session.close()
 
     # -------------------------------------------------
     # КНОПКИ
     # -------------------------------------------------
-
     keyboard = [
         ["👤 Профиль", "💰 Баланс"],
         ["👥 Моя сеть", "🔗 Реферальная ссылка"],
@@ -74,11 +89,9 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     await update.message.reply_text(
-        f"""👋 Привет, {first_name}!
-
-{text}
-
-Выберите действие:""",
+        f"👋 Привет, {first_name}!\n\n"
+        f"{text}\n\n"
+        "Выберите действие:",
         reply_markup=reply_markup
     )
 
