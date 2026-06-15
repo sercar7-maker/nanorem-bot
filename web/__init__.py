@@ -1,0 +1,1 @@
+"""Web integration module for nanorvs.ru website."""

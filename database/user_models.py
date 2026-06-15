@@ -1,0 +1,28 @@
+from sqlalchemy import Column, String, DateTime, Enum
+from sqlalchemy.dialects.postgresql import UUID
+from datetime import datetime
+from enum import Enum as PyEnum
+import uuid
+
+from .models import Base  # импортируем существующий Base
+
+
+class UserStatus(PyEnum):
+    pending = "pending"
+    active = "active"
+    blocked = "blocked"
+    deleted = "deleted"
+
+
+class User(Base):
+    __tablename__ = 'users'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email = Column(String(255), unique=True, nullable=False)
+    email_verified_at = Column(DateTime, nullable=True)
+    phone = Column(String(20), unique=True, nullable=False)
+    phone_verified_at = Column(DateTime, nullable=True)
+    password_hash = Column(String(255), nullable=False)
+    status = Column(Enum(UserStatus), default=UserStatus.pending, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
