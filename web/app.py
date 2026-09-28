@@ -53,16 +53,18 @@ def generate_link_code():
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     return templates.TemplateResponse(
-        "register.html",
-        {"request": request, "ref": None}
+        request=request,
+        name="register.html",
+        context={"request": request, "ref": None}
     )
 
 
 @app.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request, ref: int | None = None):
     return templates.TemplateResponse(
-        "register.html",
-        {"request": request, "ref": ref}
+        request=request,
+        name="register.html",
+        context={"request": request, "ref": ref}
     )
 
 
