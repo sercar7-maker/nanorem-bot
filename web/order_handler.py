@@ -1,4 +1,7 @@
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException
+
 from sqlalchemy.orm import Session
 
 from database.db import get_db
@@ -14,6 +17,7 @@ from database.models_balance import (
 
 from core.commission import CommissionCalculator
 from services.partner_service import PartnerService
+from services.withdrawal_service import WithdrawalService
 
 router = APIRouter()
 
@@ -25,17 +29,17 @@ def ping():
     return {"status": "ok"}
 
 
-# 🔥 ОБНОВЛЁННЫЙ ENDPOINT
+# рџ”Ґ РћР‘РќРћР’Р›РЃРќРќР«Р™ ENDPOINT
 @router.post("/create-partner")
 def create_partner(
     telegram_id: str,
-    ref: int = None  # 👈 НОВОЕ
+    ref: int = None  # рџ‘€ РќРћР’РћР•
 ):
     service = PartnerService()
 
     partner = service.create_partner(
         telegram_id=telegram_id,
-        upline_id=ref  # 👈 передаём ref как upline
+        upline_id=ref
     )
 
     return {
@@ -118,42 +122,35 @@ def withdraw(
     amount: float,
     db: Session = Depends(get_db)
 ):
-    transactions = db.query(BalanceTransaction).filter(
-        BalanceTransaction.partner_id == partner_id
-    ).all()
+    try:
+        service = WithdrawalService(db)
 
-    balance = sum(t.amount for t in transactions)
-
-    if amount > balance:
-        raise HTTPException(
-            status_code=400,
-            detail="Not enough balance"
+        withdrawal = service.create_pending(
+            partner_id=partner_id,
+            amount=Decimal(str(amount)),
+            method="manual",
+            details={"info": "web withdrawal"},
         )
 
-    withdrawal = Withdrawal(
-        partner_id=partner_id,
-        amount=amount,
-        method="manual",
-        details={"info": "test withdrawal"},
-        status=WithdrawalStatus.COMPLETED
-    )
+        db.commit()
+        db.refresh(withdrawal)
 
-    db.add(withdrawal)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc)
+        )
 
-    tx = BalanceTransaction(
-        partner_id=partner_id,
-        amount=-amount,
-        type=BalanceTransactionType.WITHDRAWAL,
-        description="Withdrawal"
-    )
-
-    db.add(tx)
-
-    db.commit()
-    db.refresh(withdrawal)
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="Withdrawal processing error"
+        )
 
     return {
-        "status": "paid",
+        "status": withdrawal.status.value,
         "withdrawal_id": withdrawal.id,
         "amount": amount
     }

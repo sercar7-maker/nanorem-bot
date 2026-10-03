@@ -14,22 +14,16 @@ def test_balance_hold_release_and_confirm():
             first_name="Balance Test",
             username="balance_test",
         )
-
         session.add(partner)
         session.flush()
 
         service = BalanceService(session)
 
-        # Получаем существующий баланс партнёра.
-        # Если его нет, BalanceService создаст его сам.
         balance = service._get_balance(partner.id)
-
-        # Для теста начинаем с нулевого состояния.
         balance.amount = Decimal("0.00")
         balance.hold = Decimal("0.00")
         session.flush()
 
-        # Начальное начисление 1000.
         service.add_funds(
             partner_id=partner.id,
             amount=Decimal("1000.00"),
@@ -40,7 +34,6 @@ def test_balance_hold_release_and_confirm():
         assert balance.amount == Decimal("1000.00")
         assert balance.hold == Decimal("0.00")
 
-        # Блокируем 300 под вывод.
         service.hold_funds(
             partner_id=partner.id,
             amount=Decimal("300.00"),
@@ -50,7 +43,6 @@ def test_balance_hold_release_and_confirm():
         assert balance.amount == Decimal("700.00")
         assert balance.hold == Decimal("300.00")
 
-        # Отменяем вывод.
         service.release_hold(
             partner_id=partner.id,
             amount=Decimal("300.00"),
@@ -60,7 +52,6 @@ def test_balance_hold_release_and_confirm():
         assert balance.amount == Decimal("1000.00")
         assert balance.hold == Decimal("0.00")
 
-        # Снова блокируем 300.
         service.hold_funds(
             partner_id=partner.id,
             amount=Decimal("300.00"),
@@ -70,12 +61,68 @@ def test_balance_hold_release_and_confirm():
         assert balance.amount == Decimal("700.00")
         assert balance.hold == Decimal("300.00")
 
-        # Подтверждаем успешную выплату.
         service.confirm_hold_spent(
             partner_id=partner.id,
             amount=Decimal("300.00"),
             reference_id=900003,
         )
+
+        assert balance.amount == Decimal("700.00")
+        assert balance.hold == Decimal("0.00")
+
+    finally:
+        session.rollback()
+        session.close()
+
+
+def test_confirm_hold_cannot_be_applied_twice():
+    session = SessionLocal()
+
+    try:
+        partner = Partner(
+            first_name="Balance Duplicate Test",
+            username="balance_duplicate_test",
+        )
+        session.add(partner)
+        session.flush()
+
+        service = BalanceService(session)
+
+        balance = service._get_balance(partner.id)
+        balance.amount = Decimal("0.00")
+        balance.hold = Decimal("0.00")
+        session.flush()
+
+        service.add_funds(
+            partner_id=partner.id,
+            amount=Decimal("1000.00"),
+            tx_type=BalanceTransactionType.COMMISSION,
+            reference_id=900004,
+        )
+
+        service.hold_funds(
+            partner_id=partner.id,
+            amount=Decimal("300.00"),
+            reference_id=900005,
+        )
+
+        service.confirm_hold_spent(
+            partner_id=partner.id,
+            amount=Decimal("300.00"),
+            reference_id=900005,
+        )
+
+        assert balance.amount == Decimal("700.00")
+        assert balance.hold == Decimal("0.00")
+
+        try:
+            service.confirm_hold_spent(
+                partner_id=partner.id,
+                amount=Decimal("300.00"),
+                reference_id=900005,
+            )
+        except ValueError:
+            pass
 
         assert balance.amount == Decimal("700.00")
         assert balance.hold == Decimal("0.00")
