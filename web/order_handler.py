@@ -6,14 +6,10 @@ from sqlalchemy.orm import Session
 
 from database.db import get_db
 from database.models import (
-    Purchase, OrderStatus,
-    Commission, CommissionStatus,
-    Withdrawal, WithdrawalStatus
+    Purchase,
+    OrderStatus,
 )
-from database.models_balance import (
-    BalanceTransaction,
-    BalanceTransactionType
-)
+from database.models_balance import BalanceTransaction
 
 from core.commission import CommissionCalculator
 from services.partner_service import PartnerService
@@ -186,22 +182,6 @@ async def test_order(
 
     calculator = CommissionCalculator(db, bot=None)
     await calculator.process_purchase(purchase)
-
-    commissions = db.query(Commission).filter(
-        Commission.purchase_id == purchase.id,
-        Commission.status == CommissionStatus.APPROVED
-    ).all()
-
-    for c in commissions:
-        tx = BalanceTransaction(
-            partner_id=c.partner_id,
-            amount=c.amount,
-            type=BalanceTransactionType.COMMISSION,
-            description=f"Commission from purchase {purchase.id}"
-        )
-        db.add(tx)
-
-    db.commit()
 
     return {
         "status": "ok",
