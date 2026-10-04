@@ -2,30 +2,32 @@ from database.models import Partner
 
 
 class DistributionService:
-
     def get_upline_for_new_partner(self, session):
-        """
-        Выбираем, к кому прикрепить нового партнёра
-        """
-
-        roots = session.query(Partner).filter(
-            Partner.upline_id == None
-        ).all()
+        roots = (
+            session.query(Partner)
+            .filter(Partner.upline_id.is_(None))
+            .order_by(Partner.id)
+            .all()
+        )
 
         if len(roots) < 2:
-            raise Exception("Нужно минимум 2 root-партнёра")
+            raise ValueError("Нужно минимум 2 root-партнёра")
 
-        # считаем количество прямых партнёров
-        counts = {}
+        # Берём первые два root-партнёра.
+        roots = roots[:2]
 
-        for root in roots:
-            count = session.query(Partner).filter(
-                Partner.upline_id == root.id
-            ).count()
+        root_ids = {root.id: 0 for root in roots}
 
-            counts[root.id] = count
+        # Не используем JSON.contains(), потому что SQLite
+        # работает с ним ненадёжно для нашего поля lineage.
+        partners = session.query(Partner.id, Partner.lineage).all()
 
-        # выбираем у кого меньше
-        selected_root_id = min(counts, key=counts.get)
+        for _, lineage in partners:
+            lineage = lineage or []
 
-        return selected_root_id
+            for root_id in root_ids:
+                if root_id in lineage:
+                    root_ids[root_id] += 1
+
+        # При равенстве выбирается первый root.
+        return min(root_ids, key=root_ids.get)
