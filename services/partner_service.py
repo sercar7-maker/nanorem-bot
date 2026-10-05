@@ -1,4 +1,4 @@
-from database.db import SessionLocal
+﻿from database.db import SessionLocal
 from database.models import Partner, Commission, Purchase
 from database.models_stats import PartnerStats
 from sqlalchemy import func
@@ -8,34 +8,14 @@ from collections import deque
 class PartnerService:
 
     # =========================
-    # 🎯 Выбор root по размеру сети
+    # рџЋЇ Р’С‹Р±РѕСЂ root РїРѕ СЂР°Р·РјРµСЂСѓ СЃРµС‚Рё
     # =========================
     def choose_root(self, session):
-        roots = session.query(Partner).filter(
-            Partner.upline_id.is_(None)
-        ).order_by(Partner.id).all()
+        from services.distribution_service import DistributionService
 
-        if len(roots) < 2:
-            return roots[0].id if roots else 1
-
-        def count_network(root_id):
-            return session.query(Partner).filter(
-                Partner.lineage.contains([root_id])
-            ).count()
-
-        root1 = roots[0]
-        root2 = roots[1]
-
-        count1 = count_network(root1.id)
-        count2 = count_network(root2.id)
-
-        if count1 <= count2:
-            return root1.id
-        else:
-            return root2.id
-
+        return DistributionService().get_upline_for_new_partner(session)
     # =========================
-    # 👤 Создание партнёра
+    # рџ‘¤ РЎРѕР·РґР°РЅРёРµ РїР°СЂС‚РЅС‘СЂР°
     # =========================
     def create_partner(self, telegram_id: str, upline_id: int = None):
         session = SessionLocal()
@@ -72,7 +52,7 @@ class PartnerService:
             session.commit()
             session.refresh(partner)
 
-            # 🔥 НОВОЕ: Обновляем team_size у всех предков
+            # рџ”Ґ РќРћР’РћР•: РћР±РЅРѕРІР»СЏРµРј team_size Сѓ РІСЃРµС… РїСЂРµРґРєРѕРІ
             for upline_id in lineage:
                 stats = session.query(PartnerStats).filter(
                     PartnerStats.partner_id == upline_id
@@ -94,7 +74,7 @@ class PartnerService:
             
             session.commit()
 
-            print(f"✅ CREATED partner {partner.id} with lineage {partner.lineage}")
+            print(f"вњ… CREATED partner {partner.id} with lineage {partner.lineage}")
 
             return partner
 
@@ -102,7 +82,7 @@ class PartnerService:
             session.close()
 
     # =========================
-    # 🔍 Получение партнёра
+    # рџ”Ќ РџРѕР»СѓС‡РµРЅРёРµ РїР°СЂС‚РЅС‘СЂР°
     # =========================
     def get_partner_by_telegram_id(self, telegram_id: int):
         session = SessionLocal()
@@ -115,7 +95,7 @@ class PartnerService:
         return partner
 
     # =========================
-    # 💰 Баланс
+    # рџ’° Р‘Р°Р»Р°РЅСЃ
     # =========================
     def get_partner_balance(self, partner_id: int):
         session = SessionLocal()
@@ -130,7 +110,7 @@ class PartnerService:
         return balance
 
     # =========================
-    # 🌳 Сеть (уровни)
+    # рџЊі РЎРµС‚СЊ (СѓСЂРѕРІРЅРё)
     # =========================
     def get_network_levels(self, partner_id: int):
         session = SessionLocal()
@@ -195,7 +175,7 @@ class PartnerService:
             session.close()
 
     # =========================
-    # 🌐 ID всей сети
+    # рџЊђ ID РІСЃРµР№ СЃРµС‚Рё
     # =========================
     def get_network_partner_ids(self, partner_id: int, session):
         all_ids = []
@@ -217,7 +197,7 @@ class PartnerService:
         return all_ids
 
     # =========================
-    # 📊 Статистика
+    # рџ“Љ РЎС‚Р°С‚РёСЃС‚РёРєР°
     # =========================
     def get_partner_stats(self, partner_id: int):
         session = SessionLocal()

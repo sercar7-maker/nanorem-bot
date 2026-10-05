@@ -29,5 +29,7 @@ class DistributionService:
                 if root_id in lineage:
                     root_ids[root_id] += 1
 
-        # При равенстве выбирается первый root.
-        return min(root_ids, key=root_ids.get)
+        # При равенстве выбирается root с большим ID (для балансировки)
+        min_count = min(root_ids.values())
+        candidates = [root_id for root_id, count in root_ids.items() if count == min_count]
+        return max(candidates)
