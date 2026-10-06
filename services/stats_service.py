@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from datetime import datetime
+from decimal import Decimal
 
 from database.models import Partner
 from database.models_stats import PartnerStats
@@ -21,31 +21,31 @@ class StatsService:
         if not stats:
             stats = PartnerStats(
                 partner_id=partner_id,
-                personal_turnover=0,
-                network_turnover=0,
-                monthly_personal_turnover=0,
-                monthly_network_turnover=0,
+                personal_turnover=Decimal("0.00"),
+                network_turnover=Decimal("0.00"),
+                monthly_personal_turnover=Decimal("0.00"),
+                monthly_network_turnover=Decimal("0.00"),
             )
             self.session.add(stats)
             self.session.flush()
 
         return stats
 
-    def add_personal_turnover(self, partner_id: int, amount: float):
+    def add_personal_turnover(self, partner_id: int, amount: Decimal):
 
         stats = self._get_or_create_stats(partner_id)
 
         stats.personal_turnover += amount
         stats.monthly_personal_turnover += amount
 
-    def add_network_turnover(self, partner_id: int, amount: float):
+    def add_network_turnover(self, partner_id: int, amount: Decimal):
 
         stats = self._get_or_create_stats(partner_id)
 
         stats.network_turnover += amount
         stats.monthly_network_turnover += amount
 
-    def process_purchase(self, partner_id: int, amount: float):
+    def process_purchase(self, partner_id: int, amount: Decimal):
 
         partner = (
             self.session.query(Partner)
@@ -54,7 +54,7 @@ class StatsService:
         )
 
         if not partner:
-            return
+            raise ValueError(f"Партнёр {partner_id} не найден")
 
         # -------------------------------------------------
         # ЛИЧНЫЙ ОБОРОТ
@@ -68,11 +68,9 @@ class StatsService:
 
         lineage = partner.lineage or []
 
-        for upline_id in lineage:
+        for upline_id in dict.fromkeys(lineage):
+            if upline_id == partner_id:
+                continue
             self.add_network_turnover(upline_id, amount)
 
-        # -------------------------------------------------
-        # ✅ ФИКСИРУЕМ В БД
-        # -------------------------------------------------
-
-        self.session.commit()
+        return self._get_or_create_stats(partner_id)

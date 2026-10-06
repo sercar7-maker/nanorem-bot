@@ -1,6 +1,6 @@
 """
 API Client for nanorvs.ru WooCommerce integration.
-Uses query string authentication (consumer_key & consumer_secret in URL).
+Uses HTTP Basic authentication for WooCommerce API credentials.
 """
 import logging
 import requests
@@ -34,6 +34,8 @@ class NanorvsAPIClient:
         self.consumer_key = consumer_key
         self.consumer_secret = consumer_secret
         self.session = requests.Session()
+        if consumer_key and consumer_secret:
+            self.session.auth = (consumer_key, consumer_secret)
         # Добавляем заголовки, имитирующие браузер
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -41,7 +43,7 @@ class NanorvsAPIClient:
             "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
             "Accept-Encoding": "gzip, deflate, br",
         })
-        logger.info(f"Initialized NanorvsAPIClient for {base_url} (using query auth)")
+        logger.info("Initialized WooCommerce API client")
 
     def _request(
         self,
@@ -55,11 +57,6 @@ class NanorvsAPIClient:
 
         if params is None:
             params = {}
-
-        # Добавляем ключи в параметры URL
-        if self.consumer_key and self.consumer_secret:
-            params["consumer_key"] = self.consumer_key
-            params["consumer_secret"] = self.consumer_secret
 
         try:
             if method.upper() == "GET":
@@ -81,12 +78,26 @@ class NanorvsAPIClient:
             return json.loads(text)
 
         except requests.exceptions.HTTPError as e:
-            logger.error(f"HTTP error calling {endpoint}: {e}")
-            if e.response is not None:
-                logger.error(f"Response body: {e.response.text}")
+            status_code = e.response.status_code if e.response else None
+            logger.error(
+                "HTTP error calling %s (status=%s)",
+                endpoint,
+                status_code,
+            )
             return None
-        except Exception as e:
-            logger.error(f"Error calling {endpoint}: {e}")
+        except requests.exceptions.RequestException as e:
+            logger.error(
+                "Request failed calling %s (%s)",
+                endpoint,
+                type(e).__name__,
+            )
+            return None
+        except (ValueError, TypeError) as e:
+            logger.error(
+                "Invalid response from %s (%s)",
+                endpoint,
+                type(e).__name__,
+            )
             return None
 
     # ----------------------------------------------------------------------

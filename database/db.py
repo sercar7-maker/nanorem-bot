@@ -3,9 +3,10 @@ Using SQLAlchemy for ORM and session handling.
 """
 import logging
 from contextlib import contextmanager
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.exc import SQLAlchemyError
+from .migrations import upgrade_schema
 
 # Import Base from models to enable table creation
 from .models import Base
@@ -20,6 +21,13 @@ logger = logging.getLogger(__name__)
 _connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 
 _engine = create_engine(DATABASE_URL, connect_args=_connect_args)
+if DATABASE_URL.startswith("sqlite"):
+    @event.listens_for(_engine, "connect")
+    def _enable_sqlite_foreign_keys(connection, record):
+        cursor = connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
 _session_factory = sessionmaker(bind=_engine)
 
 # Thread-local scoped session (safe for multi-threaded bot)
@@ -36,6 +44,7 @@ def init_db() -> None:
     """
     try:
         Base.metadata.create_all(_engine)
+        upgrade_schema(_engine)
         logger.info("init_db: all tables created successfully.")
     except SQLAlchemyError as e:
         logger.error(f"init_db: failed to create tables: {e}")

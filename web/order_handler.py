@@ -1,15 +1,17 @@
-from decimal import Decimal
+﻿from decimal import Decimal
+import hmac
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 
 from sqlalchemy.orm import Session
 
+from config import ADMIN_API_SECRET, DEBUG
 from database.db import get_db
 from database.models import (
     Purchase,
     OrderStatus,
 )
-from database.models_balance import BalanceTransaction
+from database.models_balance import Balance, BalanceTransaction
 
 from core.commission import CommissionCalculator
 from services.partner_service import PartnerService
@@ -17,7 +19,38 @@ from services.withdrawal_service import WithdrawalService
 
 router = APIRouter()
 
-BASE_URL = "http://127.0.0.1:8000"
+BASE_URL = "https://nanorvs.ru"
+
+
+def require_admin_secret(
+    x_admin_secret: str | None = Header(default=None),
+) -> None:
+    """
+    Защита технических/административных endpoints.
+
+    Endpoint разрешён только в DEBUG-режиме и
+    только при наличии правильного секрета.
+    """
+    if not DEBUG:
+        raise HTTPException(
+            status_code=404,
+            detail="Not found",
+        )
+
+    if not ADMIN_API_SECRET:
+        raise HTTPException(
+            status_code=503,
+            detail="Admin API secret is not configured",
+        )
+
+    if not x_admin_secret or not hmac.compare_digest(
+        x_admin_secret,
+        ADMIN_API_SECRET,
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid admin secret",
+        )
 
 
 @router.get("/ping")
@@ -25,11 +58,13 @@ def ping():
     return {"status": "ok"}
 
 
-# рџ”Ґ РћР‘РќРћР’Р›РЃРќРќР«Р™ ENDPOINT
-@router.post("/create-partner")
+@router.post(
+    "/create-partner",
+    dependencies=[Depends(require_admin_secret)],
+)
 def create_partner(
     telegram_id: str,
-    ref: int = None  # рџ‘€ РќРћР’РћР•
+    ref: int = None,
 ):
     service = PartnerService()
 
@@ -45,7 +80,10 @@ def create_partner(
     }
 
 
-@router.get("/referral-link")
+@router.get(
+    "/referral-link",
+    dependencies=[Depends(require_admin_secret)],
+)
 def get_referral_link(partner_id: int):
     return {
         "partner_id": partner_id,
@@ -53,7 +91,10 @@ def get_referral_link(partner_id: int):
     }
 
 
-@router.get("/balance")
+@router.get(
+    "/balance",
+    dependencies=[Depends(require_admin_secret)],
+)
 def get_balance(
     partner_id: int,
     db: Session = Depends(get_db)
@@ -62,7 +103,12 @@ def get_balance(
         BalanceTransaction.partner_id == partner_id
     ).all()
 
-    balance = sum(t.amount for t in transactions)
+    balance = db.query(Balance.amount).filter(
+        Balance.partner_id == partner_id
+    ).scalar()
+
+    if balance is None:
+        balance = sum(t.amount for t in transactions)
 
     return {
         "partner_id": partner_id,
@@ -71,7 +117,10 @@ def get_balance(
     }
 
 
-@router.get("/transactions")
+@router.get(
+    "/transactions",
+    dependencies=[Depends(require_admin_secret)],
+)
 def get_transactions(
     partner_id: int,
     limit: int = 20,
@@ -91,7 +140,11 @@ def get_transactions(
         amount = float(t.amount)
         running_balance += amount
 
-        direction = "income" if amount > 0 else "expense"
+        direction = (
+            "income" if amount > 0
+            else "expense" if amount < 0
+            else "settlement"
+        )
 
         result.append({
             "id": t.id,
@@ -99,7 +152,11 @@ def get_transactions(
             "direction": direction,
             "type": t.type.value,
             "description": t.description,
-            "created_at": t.created_at.isoformat() if t.created_at else None,
+            "created_at": (
+                t.created_at.isoformat()
+                if t.created_at
+                else None
+            ),
             "balance_after": running_balance
         })
 
@@ -112,7 +169,10 @@ def get_transactions(
     }
 
 
-@router.post("/withdraw")
+@router.post(
+    "/withdraw",
+    dependencies=[Depends(require_admin_secret)],
+)
 def withdraw(
     partner_id: int,
     amount: float,
@@ -152,7 +212,11 @@ def withdraw(
     }
 
 
-@router.post("/test-order")
+@router.post(
+    "/test-order",
+    include_in_schema=False,
+    dependencies=[Depends(require_admin_secret)],
+)
 async def test_order(
     partner_id: int,
     amount: float,
@@ -177,11 +241,12 @@ async def test_order(
     )
 
     db.add(purchase)
-    db.commit()
-    db.refresh(purchase)
+    db.flush()
 
     calculator = CommissionCalculator(db, bot=None)
     await calculator.process_purchase(purchase)
+    db.commit()
+    db.refresh(purchase)
 
     return {
         "status": "ok",

@@ -59,6 +59,7 @@ class CommissionCalculator:
     def _build_compressed_chain(
         self,
         lineage: List[int],
+        buying_partner_id: int,
         max_levels: int = 5
     ) -> List[Tuple[int, int, bool]]:
         """
@@ -75,6 +76,10 @@ class CommissionCalculator:
         for partner_id in lineage:
             if level >= max_levels:
                 break
+
+            if partner_id == buying_partner_id:
+                skipped_inactive = True
+                continue
 
             if not self._get_partner_is_active(partner_id):
                 skipped_inactive = True
@@ -103,7 +108,11 @@ class CommissionCalculator:
         commissions: List[CommissionResult] = []
 
         # РЎС‚СЂРѕРёРј СЃР¶Р°С‚СѓСЋ С†РµРїРѕС‡РєСѓ Р°РєС‚РёРІРЅС‹С… Р°РїР»Р°Р№РЅРѕРІ
-        compressed_chain = self._build_compressed_chain(lineage, max_levels=5)
+        compressed_chain = self._build_compressed_chain(
+            lineage,
+            buying_partner_id=buying_partner_id,
+            max_levels=5,
+        )
 
         for partner_id, level, is_compressed in compressed_chain:
             if level > len(self.LEVEL_RATES):
@@ -179,9 +188,9 @@ class CommissionCalculator:
                 purchase_id=purchase.id,
                 source_partner_id=partner.id,
                 level=res.level,
-                rate=float(res.rate),
-                base_amount=float(res.base_amount),
-                amount=float(res.amount),
+                rate=res.rate,
+                base_amount=res.base_amount,
+                amount=res.amount,
                 is_compressed=res.compressed,
                 notes=res.notes,
             )
@@ -216,7 +225,4 @@ class CommissionCalculator:
         purchase.is_commission_processed = True
 
 
-        self.db.commit()
-
-
-        print("вњ… DONE")
+        logger.info("Purchase %s commission processing complete", purchase.id)

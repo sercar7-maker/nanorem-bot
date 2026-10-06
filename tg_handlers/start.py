@@ -1,9 +1,12 @@
 import logging
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes, CommandHandler
+from sqlalchemy import update as sql_update
+from sqlalchemy.exc import IntegrityError
 
+from core.security_tokens import is_telegram_binding_token_valid
 from database.db import SessionLocal
-from database.models import Partner, PartnerStatus
+from database.models import Partner
 
 logger = logging.getLogger(__name__)
 
@@ -25,54 +28,64 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     session = SessionLocal()
     partner = None
 
-    # -------------------------------------------------
-    # ШАГ 1: ПРИВЯЗКА ПО КОДУ (если код передан)
-    # -------------------------------------------------
-    if code:
-        partner = session.query(Partner).filter(
-            Partner.telegram_link_code == code
-        ).first()
+    try:
+        if code:
+            if not is_telegram_binding_token_valid(code):
+                session.query(Partner).filter(
+                    Partner.telegram_link_code == code,
+                ).update(
+                    {Partner.telegram_link_code: None},
+                    synchronize_session=False,
+                )
+                session.commit()
+                text = "❌ Срок действия кода истёк. Запросите новую ссылку."
+            else:
+                existing_binding = session.query(Partner).filter(
+                    Partner.telegram_id == telegram_id,
+                ).first()
 
-        if partner:
-            # Проверяем, не привязан ли уже этот код к другому Telegram
-            if partner.telegram_id and partner.telegram_id != telegram_id:
-                text = "❌ Этот код уже привязан к другому Telegram."
-                session.close()
-                await update.message.reply_text(text)
-                return
+                if existing_binding:
+                    text = "❌ Этот Telegram уже привязан к аккаунту."
+                else:
+                    result = session.execute(
+                        sql_update(Partner)
+                        .where(
+                            Partner.telegram_link_code == code,
+                            Partner.telegram_id.is_(None),
+                        )
+                        .values(
+                            telegram_id=telegram_id,
+                            telegram_link_code=None,
+                            username=username,
+                            first_name=first_name,
+                        )
+                    )
 
-            # Привязываем Telegram к партнёру
-            partner.telegram_id = telegram_id
-            partner.username = username
-            partner.first_name = first_name
-            partner.status = PartnerStatus.ACTIVE
-            session.commit()
-
-            text = "✅ Telegram успешно привязан!"
+                    if result.rowcount != 1:
+                        session.rollback()
+                        text = "❌ Код неверный, истёк или уже использован."
+                    else:
+                        try:
+                            session.commit()
+                            text = "✅ Telegram успешно привязан!"
+                        except IntegrityError:
+                            session.rollback()
+                            text = "❌ Этот Telegram уже привязан к аккаунту."
         else:
-            text = "❌ Неверный код. Зарегистрируйтесь на сайте."
-            session.close()
-            await update.message.reply_text(text)
-            return
+            partner = session.query(Partner).filter(
+                Partner.telegram_id == telegram_id
+            ).first()
 
-    # -------------------------------------------------
-    # ШАГ 2: ПРОВЕРЯЕМ, УЖЕ ПРИВЯЗАН?
-    # -------------------------------------------------
-    if not partner:
-        partner = session.query(Partner).filter(
-            Partner.telegram_id == telegram_id
-        ).first()
-
-        if partner:
-            text = "👋 Добро пожаловать обратно!"
-        else:
-            text = (
-                "❌ Вы не зарегистрированы.\n\n"
-                "Перейдите на сайт для регистрации:\n"
-                "https://nanorvs.ru/register"
-            )
-
-    session.close()
+            if partner:
+                text = "👋 Добро пожаловать обратно!"
+            else:
+                text = (
+                    "❌ Вы не зарегистрированы.\n\n"
+                    "Перейдите на сайт для регистрации:\n"
+                    "https://nanorvs.ru/register"
+                )
+    finally:
+        session.close()
 
     # -------------------------------------------------
     # КНОПКИ

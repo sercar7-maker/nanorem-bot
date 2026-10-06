@@ -6,7 +6,9 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Enum as SQLAlchemyEnum,
-    func
+    func,
+    Index,
+    text,
 )
 
 from sqlalchemy.orm import relationship
@@ -57,6 +59,16 @@ class Balance(Base):
 class BalanceTransaction(Base):
 
     __tablename__ = "balance_transactions"
+    __table_args__ = (
+        Index(
+            "uq_balance_tx_commission_reference",
+            "partner_id",
+            "reference_id",
+            unique=True,
+            sqlite_where=text("type = 'COMMISSION'"),
+            postgresql_where=text("type = 'COMMISSION'"),
+        ),
+    )
 
     id = Column(Integer, primary_key=True)
 

@@ -14,29 +14,6 @@ A multi-level marketing (MLM) platform for NANOREM automotive care products. Thi
 - **Telegram Bot Integration**: User-friendly interface via Telegram
 - **Analytics & Reporting**: Partner performance and sales analytics
 
-## Project Structure
-
-```
-nanorem-bot/
-├── README.md                 # Project documentation
-├── requirements.txt          # Python dependencies
-├── config.py                 # Configuration settings
-├── main.py                   # Application entry point
-├── core/                     # MLM system core logic
-│   ├── partner_manager.py    # Partner management
-│   ├── commission.py         # Commission calculations
-│   └── network.py            # Network structure
-├── database/                 # Database layer
-│   ├── models.py             # Data models
-│   └── db.py                 # Database connection
-├── telegram/                 # Telegram bot
-│   ├── bot.py                # Bot main logic
-│   └── handlers.py           # Command handlers
-└── utils/                    # Utility functions
-    ├── validators.py         # Input validation
-    └── helpers.py            # Helper functions
-```
-
 ## Technology Stack
 
 - **Backend**: Python 3.10+
@@ -82,21 +59,22 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-4. Configure settings
+4. Configure settings in `.env` (copy `.env.example` and fill in actual values)
 ```bash
-cp config.example.py config.py
-# Edit config.py with your settings
+cp .env.example .env
 ```
 
 5. Initialize database
 ```bash
-python main.py --init-db
+python init_db.py
 ```
 
-6. Run the bot
+6. Run the web app, Telegram webhook, and scheduler in one worker
 ```bash
-python main.py
+uvicorn web.app:app --host 0.0.0.0 --port 8000 --workers 1
 ```
+
+For Telegram polling instead, run `python -m tg_handlers.bot`; do not run polling and webhook modes for the same bot simultaneously. See [INSTALL.md](./INSTALL.md) for the required webhook secrets and WooCommerce setup. Never commit `.env`.
 
 ## Contributing
 

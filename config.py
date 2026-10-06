@@ -96,11 +96,13 @@ if DEBUG:
     print(f"  APP: {APP_NAME} v{APP_VERSION}")
     print(f"  DEBUG: {DEBUG}")
     print(f"  LOG_LEVEL: {LOG_LEVEL}")
-    print(f"  DATABASE: {DATABASE_URL}")
+    database_scheme = DATABASE_URL.split(":", maxsplit=1)[0]
+    print(f"  DATABASE: configured ({database_scheme})")
     print(f"  BOT_TOKEN: {'SET' if BOT_TOKEN else 'NOT SET'}")
     print(
-        f"  WEBHOOK: "
-        f"{WEBHOOK_URL if WEBHOOK_URL else 'Not configured (using polling)'}"
+        "  WEBHOOK: configured"
+        if WEBHOOK_URL
+        else "  WEBHOOK: not configured (using polling)"
     )
     print(
         f"  SECURITY: "

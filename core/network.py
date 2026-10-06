@@ -32,6 +32,18 @@ class NetworkManager:
         if partner_id in self._nodes:
             return False
 
+        if partner_id == upline_id:
+            return False
+
+        ancestor_id = upline_id
+        visited: Set[int] = set()
+        while ancestor_id is not None and ancestor_id not in visited:
+            if ancestor_id == partner_id:
+                return False
+            visited.add(ancestor_id)
+            ancestor = self._nodes.get(ancestor_id)
+            ancestor_id = ancestor.upline_id if ancestor else None
+
         if upline_id is not None and upline_id not in self._nodes:
             self._nodes[upline_id] = PartnerNode(partner_id=upline_id)
 
@@ -123,9 +135,13 @@ class NetworkManager:
 
         result: List[int] = []
         queue = list(node.downline_ids)
+        visited = {partner_id}
 
         while queue:
             current = queue.pop(0)
+            if current in visited:
+                continue
+            visited.add(current)
             result.append(current)
 
             child_node = self._nodes.get(current)

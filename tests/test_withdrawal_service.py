@@ -2,7 +2,10 @@ from decimal import Decimal
 
 from database.db import SessionLocal
 from database.models import Partner, WithdrawalStatus
-from database.models_balance import BalanceTransactionType
+from database.models_balance import (
+    BalanceTransaction,
+    BalanceTransactionType,
+)
 from core.balance_service import BalanceService
 from services.withdrawal_service import WithdrawalService
 
@@ -51,6 +54,19 @@ def test_withdrawal_complete():
         assert balance.amount == Decimal("700.00")
         assert balance.hold == Decimal("0.00")
         assert withdrawal.processed_at is not None
+        assert sum(
+            tx.amount
+            for tx in session.query(BalanceTransaction).filter_by(
+                partner_id=partner.id
+            )
+        ) == balance.amount
+
+        try:
+            withdrawal_service.complete(withdrawal.id)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("A completed withdrawal must not complete twice")
 
     finally:
         session.rollback()
@@ -105,6 +121,12 @@ def test_withdrawal_reject():
         assert balance.hold == Decimal("0.00")
         assert withdrawal.processed_at is not None
         assert withdrawal.admin_comment == "Test rejection"
+        assert sum(
+            tx.amount
+            for tx in session.query(BalanceTransaction).filter_by(
+                partner_id=partner.id
+            )
+        ) == balance.amount
 
     finally:
         session.rollback()

@@ -2,7 +2,7 @@
 
 ## Требования
 
-- Python 3.9 или выше
+- Python 3.10 или выше
 - PostgreSQL 12 или выше (или SQLite для разработки)
 - Git
 - Telegram Bot Token (от @BotFather)
@@ -44,23 +44,30 @@ cp .env.example .env
 
 ```env
 # Telegram Bot Configuration
-TELEGRAM_BOT_TOKEN=your_bot_token_from_botfather
+BOT_TOKEN=your_bot_token_from_botfather
 
 # Database Configuration
-DATABASE_URL=postgresql://user:password@localhost/nanorem_mlm
+DATABASE_URL=sqlite:///nanorem.db
 # Для разработки можно использовать SQLite:
 # DATABASE_URL=sqlite:///nanorem_mlm.db
 
 # Application Settings
 APP_NAME=NANOREM MLM System
 APP_VERSION=1.0.0
-DEBUG_MODE=False
+DEBUG=false
 LOG_LEVEL=INFO
 
-# Cash Register Integration (optional)
-CASH_REGISTER_API_URL=https://api.example.com
-CASH_REGISTER_API_KEY=your_api_key
-CASH_REGISTER_SHOP_ID=your_shop_id
+# WooCommerce webhook authentication
+WOOCOMMERCE_WEBHOOK_SECRET=your_woocommerce_webhook_secret
+
+# Set these only for Telegram webhook mode
+# WEBHOOK_URL=https://yourdomain.com
+# TELEGRAM_WEBHOOK_SECRET=your_telegram_webhook_secret
+
+# Optional WooCommerce REST API access
+# WC_API_BASE_URL=https://yourdomain.com/wp-json/wc/v3
+# WC_CONSUMER_KEY=your_consumer_key
+# WC_CONSUMER_SECRET=your_consumer_secret
 ```
 
 ## Шаг 5: Инициализация базы данных
@@ -70,26 +77,33 @@ CASH_REGISTER_SHOP_ID=your_shop_id
 createdb nanorem_mlm
 
 # Или используйте SQLite (файл будет создан автоматически)
+python init_db.py
 ```
 
 ## Шаг 6: Запуск приложения
 
-### Запуск Telegram бота
+### Web-приложение и Telegram webhook
 
 ```bash
-python main.py --mode telegram
+uvicorn web.app:app --host 0.0.0.0 --port 8000 --workers 1
 ```
 
-### Запуск в режиме отладки
+Для WooCommerce настройте webhook на `https://yourdomain.com/webhook` и задайте `WOOCOMMERCE_WEBHOOK_SECRET`. Для Telegram webhook укажите `WEBHOOK_URL=https://yourdomain.com` (без пути) и `TELEGRAM_WEBHOOK_SECRET`; маршрут `/telegram-webhook` будет добавлен автоматически.
+
+### Альтернативный запуск Telegram polling
 
 ```bash
-python main.py --mode telegram --debug
+python -m tg_handlers.bot
 ```
+
+Не запускайте одновременно polling- и webhook-режимы для одного Telegram-бота. Polling entry point инициализирует базу данных и scheduler. У обоих режимов должен быть один процесс/worker: приложение содержит in-process scheduler и Telegram client.
+
+`main.py` — отдельное legacy FastAPI-приложение для технических routes, не entry point для регистрации или webhook.
 
 ### Запуск в фоновом режиме (Linux)
 
 ```bash
-nohup python main.py --mode telegram > bot.log 2>&1 &
+nohup uvicorn web.app:app --host 0.0.0.0 --port 8000 --workers 1 > app.log 2>&1 &
 ```
 
 ## Шаг 7: Регистрация Telegram бота
@@ -134,7 +148,7 @@ Type=simple
 User=your_user
 WorkingDirectory=/path/to/nanorem-bot
 Environment="PATH=/path/to/nanorem-bot/venv/bin"
-ExecStart=/path/to/nanorem-bot/venv/bin/python main.py --mode telegram
+ExecStart=/path/to/nanorem-bot/venv/bin/uvicorn web.app:app --host 0.0.0.0 --port 8000 --workers 1
 Restart=always
 RestartSec=10
 
@@ -166,7 +180,7 @@ sudo systemctl status nanorem-bot
 
 ### Бот не отвечает
 
-- Проверьте правильность TELEGRAM_BOT_TOKEN
+- Проверьте правильность BOT_TOKEN
 - Убедитесь, что бот запущен
 - Проверьте логи: `tail -f bot.log`
 

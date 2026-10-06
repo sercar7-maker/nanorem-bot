@@ -5,12 +5,13 @@ import enum
 import uuid
 
 from sqlalchemy import (
-    Column, Integer, String, Float, DateTime, ForeignKey,
-    Enum as SQLEnum, Text, Boolean, JSON
+    Column, Integer, String, Numeric, DateTime, ForeignKey,
+    Enum as SQLEnum, Text, Boolean, JSON, UniqueConstraint
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import UUID
+from core.security_tokens import create_telegram_binding_token
 
 from database.base import Base
 
@@ -60,7 +61,7 @@ class Partner(Base):
     telegram_link_code = Column(
         String,
         unique=True,
-        default=lambda: str(uuid.uuid4())[:8]
+        default=create_telegram_binding_token
     )
 
     first_name = Column(String)
@@ -68,6 +69,9 @@ class Partner(Base):
     username = Column(String)
     email = Column(String)
     phone = Column(String)
+    consent_given = Column(Boolean, nullable=False, default=False)
+    consent_version = Column(String(50), nullable=True)
+    consent_date = Column(DateTime, nullable=True)
 
     upline_id = Column(Integer, ForeignKey("partners.id"), index=True)
 
@@ -120,6 +124,9 @@ class Partner(Base):
 
 class Purchase(Base):
     __tablename__ = "purchases"
+    __table_args__ = (
+        UniqueConstraint("ext_ref", name="uq_purchases_ext_ref"),
+    )
 
     id = Column(Integer, primary_key=True)
 
@@ -132,7 +139,7 @@ class Purchase(Base):
         index=True,
     )
 
-    amount = Column(Float, nullable=False)
+    amount = Column(Numeric(18, 2), nullable=False)
 
     currency = Column(String(10), default="RUB")
 
@@ -141,7 +148,7 @@ class Purchase(Base):
         default=OrderStatus.PENDING,
     )
 
-    ext_ref = Column(String(100))  # id заказа с сайта
+    ext_ref = Column(String(100), nullable=True)  # id заказа с сайта
 
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -167,6 +174,13 @@ class Purchase(Base):
 
 class Commission(Base):
     __tablename__ = "commissions"
+    __table_args__ = (
+        UniqueConstraint(
+            "purchase_id",
+            "level",
+            name="uq_commissions_purchase_level",
+        ),
+    )
 
     id = Column(Integer, primary_key=True)
 
@@ -191,11 +205,11 @@ class Commission(Base):
 
     level = Column(Integer, nullable=False)
 
-    rate = Column(Float, nullable=False)
+    rate = Column(Numeric(5, 4), nullable=False)
 
-    base_amount = Column(Float, nullable=False)
+    base_amount = Column(Numeric(18, 2), nullable=False)
 
-    amount = Column(Float, nullable=False)
+    amount = Column(Numeric(18, 2), nullable=False)
 
     status = Column(
         SQLEnum(CommissionStatus),
@@ -273,7 +287,7 @@ class Withdrawal(Base):
         index=True,
     )
 
-    amount = Column(Float, nullable=False)
+    amount = Column(Numeric(18, 2), nullable=False)
 
     method = Column(String, nullable=False)
 

@@ -1,6 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from core.balance_service import BalanceService
@@ -70,13 +71,25 @@ class WithdrawalService:
         Деньги, которые были в hold, окончательно списываются.
         """
 
-        withdrawal = self._get_withdrawal(withdrawal_id)
+        processed_at = datetime.utcnow()
+        result = self.session.execute(
+            update(Withdrawal)
+            .where(
+                Withdrawal.id == withdrawal_id,
+                Withdrawal.status == WithdrawalStatus.PENDING,
+            )
+            .values(
+                status=WithdrawalStatus.COMPLETED,
+                processed_at=processed_at,
+            )
+        )
 
-        if withdrawal.status != WithdrawalStatus.PENDING:
+        if result.rowcount != 1:
             raise ValueError(
                 "Завершить можно только заявку со статусом PENDING"
             )
 
+        withdrawal = self._get_withdrawal(withdrawal_id)
         amount = Decimal(str(withdrawal.amount))
 
         self.balance_service.confirm_hold_spent(
@@ -84,9 +97,6 @@ class WithdrawalService:
             amount=amount,
             reference_id=withdrawal.id,
         )
-
-        withdrawal.status = WithdrawalStatus.COMPLETED
-        withdrawal.processed_at = datetime.utcnow()
 
         self.session.flush()
 
@@ -103,13 +113,26 @@ class WithdrawalService:
         Деньги из hold возвращаются на доступный баланс.
         """
 
-        withdrawal = self._get_withdrawal(withdrawal_id)
+        processed_at = datetime.utcnow()
+        result = self.session.execute(
+            update(Withdrawal)
+            .where(
+                Withdrawal.id == withdrawal_id,
+                Withdrawal.status == WithdrawalStatus.PENDING,
+            )
+            .values(
+                status=WithdrawalStatus.REJECTED,
+                processed_at=processed_at,
+                admin_comment=admin_comment,
+            )
+        )
 
-        if withdrawal.status != WithdrawalStatus.PENDING:
+        if result.rowcount != 1:
             raise ValueError(
                 "Отклонить можно только заявку со статусом PENDING"
             )
 
+        withdrawal = self._get_withdrawal(withdrawal_id)
         amount = Decimal(str(withdrawal.amount))
 
         self.balance_service.release_hold(
@@ -117,10 +140,6 @@ class WithdrawalService:
             amount=amount,
             reference_id=withdrawal.id,
         )
-
-        withdrawal.status = WithdrawalStatus.REJECTED
-        withdrawal.processed_at = datetime.utcnow()
-        withdrawal.admin_comment = admin_comment
 
         self.session.flush()
 

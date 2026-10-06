@@ -49,6 +49,7 @@ def main():
 
     import asyncio
     asyncio.run(calculator.process_purchase(purchase))
+    session.commit()
 
     # 5. проверяем комиссии
     from database.models import Commission

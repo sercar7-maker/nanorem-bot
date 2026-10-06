@@ -111,6 +111,7 @@ async def run_5level_test():
         # 5. Запускаем расчет комиссий
         calculator = CommissionCalculator(session, bot=None)
         await calculator.process_purchase(purchase)
+        session.commit()
 
         # 6. Проверяем комиссии
         print("\n" + "=" * 60)

@@ -1,23 +1,28 @@
-import httpx
-import os
-from dotenv import load_dotenv
+def main():
+    import os
 
-# загружаем .env
-load_dotenv()
+    import httpx
+    from dotenv import load_dotenv
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+    load_dotenv()
+    bot_token = os.getenv("BOT_TOKEN")
 
-print("TOKEN:", BOT_TOKEN)
+    if not bot_token:
+        raise RuntimeError("BOT_TOKEN is not configured")
 
-url = f"https://api.telegram.org/bot{BOT_TOKEN}/getMe"
+    url = f"https://api.telegram.org/bot{bot_token}/getMe"
 
-print("START TELEGRAM TEST")
+    print("START TELEGRAM TEST")
 
-try:
-    response = httpx.get(url, timeout=10)
-    print("STATUS:", response.status_code)
-    print("RESPONSE:", response.text)
-except Exception as e:
-    print("ERROR:", repr(e))
+    try:
+        response = httpx.get(url, timeout=10)
+        print("STATUS:", response.status_code)
+        print("RESPONSE:", response.text)
+    except httpx.HTTPError as error:
+        print("ERROR:", type(error).__name__)
 
-print("END TEST")
+    print("END TEST")
+
+
+if __name__ == "__main__":
+    main()

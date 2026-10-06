@@ -14,6 +14,8 @@ from database.models import Partner, Purchase, OrderStatus
 from web.api_client import NanorvsAPIClient
 from core.commission import CommissionCalculator
 from services.distribution_service import DistributionService
+from services.stats_service import StatsService
+from services.rank_service import RankService
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +155,14 @@ class OrderProcessor:
             # flush получает purchase.id, но НЕ делает commit.
             session.flush()
 
+            stats = StatsService(session).process_purchase(
+                partner_id=partner.id,
+                amount=total_amount,
+            )
+            partner.rank = RankService(session).calculate_rank(
+                stats.personal_turnover
+            )
+
             logger.info(
                 f"Создана Purchase ID={purchase.id} "
                 f"для партнёра ID={partner.id}"
@@ -168,17 +178,7 @@ class OrderProcessor:
             )
 
             await calculator.process_purchase(purchase)
-
-            # -------------------------------------------------
-            # ВАЖНО:
-            # CommissionCalculator сейчас выполняет commit().
-            #
-            # Поэтому отдельный commit здесь НЕ нужен.
-            # Если комиссия завершилась успешно —
-            # транзакция уже зафиксирована.
-            # Если комиссия выбросила исключение —
-            # попадаем в except и делаем rollback.
-            # -------------------------------------------------
+            session.commit()
 
             logger.info(
                 f"Заказ #{order_id} "

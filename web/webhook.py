@@ -8,15 +8,13 @@ from typing import Dict, Any, Optional
 from database.db import SessionLocal
 from database.models import Purchase
 
-from .order_handler import OrderHandler
-
 logger = logging.getLogger(__name__)
 
 
 class WebhookHandler:
     """Handle webhook notifications from nanorvs.ru."""
     
-    def __init__(self, order_handler: OrderHandler, webhook_secret: Optional[str] = None):
+    def __init__(self, order_handler: Any, webhook_secret: Optional[str] = None):
         self.order_handler = order_handler
         self.webhook_secret = webhook_secret
         logger.info("Initialized WebhookHandler")
@@ -24,7 +22,8 @@ class WebhookHandler:
     def verify_signature(self, payload: str, signature: str) -> bool:
         """Verify webhook signature."""
         if not self.webhook_secret:
-            return True
+            logger.error("Webhook signature verification is not configured")
+            return False
         
         expected = hmac.new(
             self.webhook_secret.encode(),

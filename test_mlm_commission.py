@@ -123,6 +123,7 @@ async def run_commission_test():
         # Запускаем расчет комиссий
         calculator = CommissionCalculator(session, bot=None)
         await calculator.process_purchase(purchase_left)
+        session.commit()
 
         # 6. Создаем покупку для Partner D (правая нога)
         print("\n--- Покупка в ПРАВОЙ ноге (Partner D) ---")
@@ -137,6 +138,7 @@ async def run_commission_test():
         session.refresh(purchase_right)
 
         await calculator.process_purchase(purchase_right)
+        session.commit()
 
         # 7. Проверяем комиссии
         print("\n" + "=" * 50)

@@ -32,7 +32,6 @@ class RankService:
         if partner.rank != new_rank:
             old_rank = partner.rank
             partner.rank = new_rank
-            self.session.commit()
             return old_rank, new_rank
 
         return None, None

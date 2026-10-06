@@ -2,14 +2,13 @@ import base64
 import hashlib
 import hmac
 import logging
-import random
-import string
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, Request, Form, Header, HTTPException
+from fastapi import FastAPI, Request, Form, Header, HTTPException, status
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.exc import IntegrityError
 
 from telegram import Bot, Update
 from telegram.ext import Application
@@ -21,14 +20,16 @@ from config import (
     TELEGRAM_WEBHOOK_SECRET,
 )
 
-from database.db import get_session, SessionLocal
+from database.db import get_session, SessionLocal, init_db
 from database.models import Partner
 
 from web.api_client import NanorvsAPIClient
 from core.commission import CommissionCalculator
+from core.security_tokens import create_telegram_binding_token
 from services.notifications import NotificationService
 from tg_handlers.handlers import setup_handlers
 from services.order_processor import OrderProcessor
+from scheduler import start_scheduler, stop_scheduler
 
 logger = logging.getLogger(__name__)
 
@@ -82,15 +83,6 @@ order_processor = OrderProcessor(
 # Регистрация
 # ---------------------------------------------------------
 
-def generate_link_code() -> str:
-    return "".join(
-        random.choices(
-            string.digits,
-            k=6,
-        )
-    )
-
-
 @app.get(
     "/",
     response_class=HTMLResponse,
@@ -139,88 +131,79 @@ async def register_user(
     ref: str | None = Form(None),
     consent: str | None = Form(None),
 ):
-    link_code = generate_link_code()
+    if consent is None or consent.lower() != "on":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Consent is required",
+        )
 
-    consent_given = (
-        consent is not None
-        and consent.lower() == "on"
-    )
-
+    binding_token = create_telegram_binding_token()
     upline_id = None
 
     if ref and ref != "None" and ref.strip():
         try:
             upline_id = int(ref)
-        except ValueError:
-            pass
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid referral",
+            ) from exc
+
+        with get_session() as session:
+            if not session.query(Partner.id).filter(
+                Partner.id == upline_id
+            ).first():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Referral partner not found",
+                )
 
     from services.partner_service import PartnerService
 
     partner_service = PartnerService()
 
-    new_partner = partner_service.create_partner(
-        telegram_id=None,
-        upline_id=upline_id,
-    )
-
-    with get_session() as session:
-        partner = (
-            session.query(Partner)
-            .filter(
-                Partner.id == new_partner.id
-            )
-            .first()
+    try:
+        partner_service.create_partner(
+            telegram_id=None,
+            upline_id=upline_id,
+            first_name=first_name,
+            last_name=last_name,
+            email=email,
+            phone=phone,
+            telegram_link_code=binding_token,
+            consent_given=True,
+            consent_version="v.1.0 21.04.2026",
+            consent_date=datetime.utcnow(),
         )
+    except (ValueError, IntegrityError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unable to create partner",
+        ) from exc
 
-        if partner:
-            partner.telegram_link_code = link_code
-            partner.first_name = first_name
-            partner.last_name = last_name
-            partner.email = email
-            partner.phone = phone
-            partner.consent_given = consent_given
-            partner.consent_version = (
-                "v.1.0 21.04.2026"
-            )
-            partner.consent_date = (
-                datetime.utcnow()
-                if consent_given
-                else None
+    if upline_id:
+        with get_session() as session:
+            upline = session.query(Partner).filter(
+                Partner.id == upline_id
+            ).first()
+            upline_telegram_id = (
+                upline.telegram_id if upline else None
             )
 
-            session.commit()
-            session.refresh(partner)
+        if upline_telegram_id:
+            full_name = f"{first_name} {last_name}"
 
-            if upline_id:
-                upline = (
-                    session.query(Partner)
-                    .filter(
-                        Partner.id == upline_id
+            try:
+                import asyncio
+
+                asyncio.create_task(
+                    notification_service.notify_new_referral(
+                        telegram_id=int(upline_telegram_id),
+                        partner_name=full_name,
                     )
-                    .first()
                 )
-
-                if upline and upline.telegram_id:
-                    full_name = (
-                        f"{first_name} {last_name}"
-                    )
-
-                    try:
-                        import asyncio
-
-                        asyncio.create_task(
-                            notification_service.notify_new_referral(
-                                telegram_id=int(
-                                    upline.telegram_id
-                                ),
-                                partner_name=full_name,
-                            )
-                        )
-
-                    except Exception as e:
-                        logger.error(
-                            f"Notify error: {e}"
-                        )
+            except Exception:
+                logger.exception("Failed to schedule referral notification")
 
     return HTMLResponse(
         f"""
@@ -248,7 +231,7 @@ async def register_user(
             <br>
 
             <a href="
-                https://t.me/nanorem_bot?start={link_code}
+                https://t.me/nanorem_bot?start={binding_token}
             ">
                 <button style="
                     font-size:20px;
@@ -268,7 +251,7 @@ async def register_user(
             <p>Если кнопка не работает:</p>
 
             <pre>
-https://t.me/nanorem_bot?start={link_code}
+https://t.me/nanorem_bot?start={binding_token}
             </pre>
 
         </body>
@@ -383,12 +366,10 @@ async def webhook_endpoint(
             "Failed to process webhook order"
         )
 
-        return {
-            "success": False,
-            "message": (
-                "Order processing failed"
-            ),
-        }
+        raise HTTPException(
+            status_code=500,
+            detail="Order processing failed",
+        )
 
     except HTTPException:
         raise
@@ -398,10 +379,10 @@ async def webhook_endpoint(
             f"Error processing webhook: {e}"
         )
 
-        return {
-            "success": False,
-            "error": str(e),
-        }
+        raise HTTPException(
+            status_code=500,
+            detail="Webhook processing failed",
+        ) from e
 
 
 # ---------------------------------------------------------
@@ -475,7 +456,7 @@ async def telegram_webhook(
 
         return {
             "status": "error",
-            "detail": str(e),
+            "detail": "Telegram update processing failed",
         }
 
 
@@ -489,9 +470,15 @@ async def on_startup():
     Инициализация Telegram и установка webhook.
     """
 
+    init_db()
     await telegram_app.initialize()
 
     if WEBHOOK_URL:
+        if not TELEGRAM_WEBHOOK_SECRET:
+            raise RuntimeError(
+                "TELEGRAM_WEBHOOK_SECRET is required when WEBHOOK_URL is set"
+            )
+
         webhook_url = (
             f"{WEBHOOK_URL}/telegram-webhook"
         )
@@ -501,16 +488,15 @@ async def on_startup():
             secret_token=TELEGRAM_WEBHOOK_SECRET,
         )
 
-        logger.info(
-            f"Telegram webhook set to: "
-            f"{webhook_url}"
-        )
+        logger.info("Telegram webhook configured")
 
     else:
         logger.warning(
             "WEBHOOK_URL not set, "
             "Telegram webhook not configured"
         )
+
+    start_scheduler()
 
 
 # ---------------------------------------------------------
@@ -526,3 +512,4 @@ async def on_shutdown():
     await telegram_app.bot.delete_webhook()
 
     await telegram_app.shutdown()
+    stop_scheduler()

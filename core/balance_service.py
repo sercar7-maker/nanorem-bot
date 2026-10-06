@@ -1,7 +1,7 @@
 from decimal import Decimal
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from database.models_balance import (
@@ -28,7 +28,7 @@ class BalanceService:
         self.session = session
 
     def _validate_amount(self, amount: Decimal) -> None:
-        if amount <= 0:
+        if not amount.is_finite() or amount <= 0:
             raise ValueError("Сумма должна быть положительной")
 
     def _validate_balance_state(self, balance: Balance) -> None:
@@ -146,7 +146,12 @@ class BalanceService:
             return self._get_balance(partner_id)
 
         balance = self._get_balance(partner_id)
-        balance.amount += amount
+        self.session.execute(
+            update(Balance)
+            .where(Balance.partner_id == partner_id)
+            .values(amount=Balance.amount + amount)
+        )
+        self.session.refresh(balance)
 
         transaction = BalanceTransaction(
             partner_id=partner_id,
@@ -188,11 +193,22 @@ class BalanceService:
 
         balance = self._get_balance(partner_id)
 
-        if balance.amount < amount:
+        result = self.session.execute(
+            update(Balance)
+            .where(
+                Balance.partner_id == partner_id,
+                Balance.amount >= amount,
+            )
+            .values(
+                amount=Balance.amount - amount,
+                hold=Balance.hold + amount,
+            )
+        )
+
+        if result.rowcount != 1:
             raise ValueError("Недостаточно средств")
 
-        balance.amount -= amount
-        balance.hold += amount
+        self.session.refresh(balance)
 
         transaction = BalanceTransaction(
             partner_id=partner_id,
@@ -234,11 +250,22 @@ class BalanceService:
 
         balance = self._get_balance(partner_id)
 
-        if balance.hold < amount:
+        result = self.session.execute(
+            update(Balance)
+            .where(
+                Balance.partner_id == partner_id,
+                Balance.hold >= amount,
+            )
+            .values(
+                hold=Balance.hold - amount,
+                amount=Balance.amount + amount,
+            )
+        )
+
+        if result.rowcount != 1:
             raise ValueError("Недостаточно средств в hold")
 
-        balance.hold -= amount
-        balance.amount += amount
+        self.session.refresh(balance)
 
         transaction = BalanceTransaction(
             partner_id=partner_id,
@@ -280,14 +307,23 @@ class BalanceService:
 
         balance = self._get_balance(partner_id)
 
-        if balance.hold < amount:
+        result = self.session.execute(
+            update(Balance)
+            .where(
+                Balance.partner_id == partner_id,
+                Balance.hold >= amount,
+            )
+            .values(hold=Balance.hold - amount)
+        )
+
+        if result.rowcount != 1:
             raise ValueError("Недостаточно средств в hold")
 
-        balance.hold -= amount
+        self.session.refresh(balance)
 
         transaction = BalanceTransaction(
             partner_id=partner_id,
-            amount=-amount,
+            amount=Decimal("0.00"),
             type=BalanceTransactionType.WITHDRAWAL,
             reference_id=reference_id,
             external_id=external_id,

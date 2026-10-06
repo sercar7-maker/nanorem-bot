@@ -7,6 +7,7 @@ from services.rank_service import RankService
 
 from database.db import SessionLocal
 from database.models import Partner
+from database.models_stats import PartnerStats
 
 logger = logging.getLogger(__name__)
 
@@ -77,12 +78,12 @@ async def test_order(update, context):
             status=OrderStatus.PAID,
         )
         session.add(purchase)
-        session.commit()
-        session.refresh(purchase)
+        session.flush()
 
         # Запускаем расчёт комиссий
         calculator = CommissionCalculator(session, context.bot)
         await calculator.process_purchase(purchase)
+        session.commit()
 
         await update.message.reply_text(
             "🎉 Заказ от нижнего партнёра обработан"
@@ -138,7 +139,11 @@ async def button_handler(update, context):
 
         elif text == "👤 Профиль":
             rank_service = RankService(session)
-            rank = rank_service.calculate_rank(partner.id)
+            stats = session.query(PartnerStats).filter(
+                PartnerStats.partner_id == partner.id
+            ).first()
+            turnover = stats.personal_turnover if stats else 0
+            rank = rank_service.calculate_rank(turnover)
             await update.message.reply_text(
                 f"👤 Профиль\n\n"
                 f"ID: {partner.id}\n"
@@ -163,7 +168,7 @@ async def button_handler(update, context):
             link_code = partner.telegram_link_code
             message = (
                 "🔗 Ваша ссылка\n\n"
-                f"https://nanorvs.ru/register?ref={link_code}\n\n"
+                f"https://nanorvs.ru/register?ref={partner.id}\n\n"
                 "Приглашайте партнёров и зарабатывайте 💰"
             )
             await update.message.reply_text(message)

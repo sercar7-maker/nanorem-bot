@@ -1,8 +1,10 @@
 ﻿from database.db import SessionLocal
 from database.models import Partner, Commission, Purchase
+from database.models_balance import Balance
 from database.models_stats import PartnerStats
 from sqlalchemy import func
 from collections import deque
+from datetime import datetime
 
 
 class PartnerService:
@@ -17,7 +19,20 @@ class PartnerService:
     # =========================
     # рџ‘¤ РЎРѕР·РґР°РЅРёРµ РїР°СЂС‚РЅС‘СЂР°
     # =========================
-    def create_partner(self, telegram_id: str, upline_id: int = None):
+    def create_partner(
+        self,
+        telegram_id: str | None,
+        upline_id: int | None = None,
+        *,
+        first_name: str | None = None,
+        last_name: str | None = None,
+        email: str | None = None,
+        phone: str | None = None,
+        telegram_link_code: str | None = None,
+        consent_given: bool = False,
+        consent_version: str | None = None,
+        consent_date: datetime | None = None,
+    ):
         session = SessionLocal()
 
         try:
@@ -35,22 +50,31 @@ class PartnerService:
                     Partner.id == upline_id
                 ).first()
 
-                if upline:
-                    lineage = list(upline.lineage or [])
-                    lineage.insert(0, upline.id)
+                if not upline:
+                    raise ValueError("Реферальный партнёр не найден")
+
+                lineage = list(upline.lineage or [])
+                lineage.insert(0, upline.id)
 
             partner = Partner(
                 telegram_id=telegram_id,
+                first_name=first_name,
+                last_name=last_name,
+                email=email,
+                phone=phone,
                 upline_id=upline_id,
                 lineage=lineage,
+                telegram_link_code=telegram_link_code,
+                consent_given=consent_given,
+                consent_version=consent_version,
+                consent_date=consent_date,
                 status="ACTIVE",
                 role="partner",
                 rank="Partner"
             )
 
             session.add(partner)
-            session.commit()
-            session.refresh(partner)
+            session.flush()
 
             # рџ”Ґ РќРћР’РћР•: РћР±РЅРѕРІР»СЏРµРј team_size Сѓ РІСЃРµС… РїСЂРµРґРєРѕРІ
             for upline_id in lineage:
@@ -73,6 +97,7 @@ class PartnerService:
                 stats.team_size += 1
             
             session.commit()
+            session.refresh(partner)
 
             print(f"вњ… CREATED partner {partner.id} with lineage {partner.lineage}")
 
@@ -100,14 +125,22 @@ class PartnerService:
     def get_partner_balance(self, partner_id: int):
         session = SessionLocal()
 
-        balance = session.query(
-            func.coalesce(func.sum(Commission.amount), 0)
-        ).filter(
-            Commission.partner_id == partner_id
-        ).scalar()
+        try:
+            balance = session.query(Balance.amount).filter(
+                Balance.partner_id == partner_id
+            ).scalar()
 
-        session.close()
-        return balance
+            if balance is not None:
+                return balance
+
+            # Legacy accounts may have commissions but no balance row.
+            return session.query(
+                func.coalesce(func.sum(Commission.amount), 0)
+            ).filter(
+                Commission.partner_id == partner_id
+            ).scalar()
+        finally:
+            session.close()
 
     # =========================
     # рџЊі РЎРµС‚СЊ (СѓСЂРѕРІРЅРё)
@@ -124,50 +157,30 @@ class PartnerService:
         }
 
         try:
-            level_1 = session.query(Partner).filter(
-                Partner.upline_id == partner_id
-            ).all()
+            frontier = [partner_id]
+            visited = {partner_id}
+            depth = 0
+            total = 0
 
-            levels[1] = len(level_1)
-
-            level_1_ids = [p.id for p in level_1]
-
-            level_2 = []
-            if level_1_ids:
-                level_2 = session.query(Partner).filter(
-                    Partner.upline_id.in_(level_1_ids)
+            while frontier:
+                children = session.query(Partner).filter(
+                    Partner.upline_id.in_(frontier)
                 ).all()
-                levels[2] = len(level_2)
+                frontier = [
+                    child.id
+                    for child in children
+                    if child.id not in visited
+                ]
+                if not frontier:
+                    break
 
-            level_2_ids = [p.id for p in level_2]
+                visited.update(frontier)
+                depth += 1
+                total += len(frontier)
+                if depth <= 5:
+                    levels[depth] = len(frontier)
 
-            level_3 = []
-            if level_2_ids:
-                level_3 = session.query(Partner).filter(
-                    Partner.upline_id.in_(level_2_ids)
-                ).all()
-                levels[3] = len(level_3)
-
-            level_3_ids = [p.id for p in level_3]
-
-            level_4 = []
-            if level_3_ids:
-                level_4 = session.query(Partner).filter(
-                    Partner.upline_id.in_(level_3_ids)
-                ).all()
-                levels[4] = len(level_4)
-
-            level_4_ids = [p.id for p in level_4]
-
-            if level_4_ids:
-                level_5 = session.query(Partner).filter(
-                    Partner.upline_id.in_(level_4_ids)
-                ).all()
-                levels[5] = len(level_5)
-
-            levels["total"] = (
-                levels[1] + levels[2] + levels[3] + levels[4] + levels[5]
-            )
+            levels["total"] = total
 
             return levels
 
@@ -181,17 +194,19 @@ class PartnerService:
         all_ids = []
 
         level_ids = [partner_id]
+        visited = {partner_id}
 
-        for _ in range(5):
+        while level_ids:
             partners = session.query(Partner).filter(
                 Partner.upline_id.in_(level_ids)
             ).all()
 
-            level_ids = [p.id for p in partners]
-
-            if not level_ids:
-                break
-
+            level_ids = [
+                partner.id
+                for partner in partners
+                if partner.id not in visited
+            ]
+            visited.update(level_ids)
             all_ids.extend(level_ids)
 
         return all_ids

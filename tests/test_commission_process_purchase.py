@@ -11,7 +11,11 @@ from core.commission import CommissionCalculator
 
 def test_process_purchase_creates_five_commissions_and_is_idempotent():
     session = SessionLocal()
-    session.commit = session.flush
+    session.commit = Mock(
+        side_effect=AssertionError(
+            "CommissionCalculator must not commit the caller's transaction"
+        )
+    )
 
     suffix = uuid4().hex[:8]
 
@@ -133,6 +137,7 @@ def test_process_purchase_creates_five_commissions_and_is_idempotent():
         calculator = CommissionCalculator(session, Mock())
 
         asyncio.run(calculator.process_purchase(purchase))
+        session.commit.assert_not_called()
 
         commissions = (
             session.query(Commission)
@@ -212,6 +217,7 @@ def test_process_purchase_creates_five_commissions_and_is_idempotent():
 
         # Повторная обработка той же покупки ничего не должна начислить.
         asyncio.run(calculator.process_purchase(purchase))
+        session.commit.assert_not_called()
 
         assert (
             session.query(Commission)

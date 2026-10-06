@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from database.db import SessionLocal
 from database.models import Partner
-from database.models_balance import BalanceTransactionType
+from database.models_balance import BalanceTransaction, BalanceTransactionType
 from core.balance_service import BalanceService
 
 
@@ -30,9 +30,24 @@ def test_balance_hold_release_and_confirm():
             tx_type=BalanceTransactionType.COMMISSION,
             reference_id=900001,
         )
+        service.add_funds(
+            partner_id=partner.id,
+            amount=Decimal("1000.00"),
+            tx_type=BalanceTransactionType.COMMISSION,
+            reference_id=900001,
+        )
 
         assert balance.amount == Decimal("1000.00")
         assert balance.hold == Decimal("0.00")
+        assert (
+            session.query(BalanceTransaction)
+            .filter_by(
+                partner_id=partner.id,
+                reference_id=900001,
+            )
+            .count()
+            == 1
+        )
 
         service.hold_funds(
             partner_id=partner.id,
