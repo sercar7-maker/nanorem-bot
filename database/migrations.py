@@ -2,6 +2,10 @@ import logging
 import re
 
 from sqlalchemy import Float, Engine, inspect, text
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+from database.models import RootAllocationLock
 
 
 logger = logging.getLogger(__name__)
@@ -105,6 +109,43 @@ def _add_consent_columns(connection, inspector) -> None:
                 )
             )
 
+
+def _ensure_root_allocation_lock(connection) -> None:
+    RootAllocationLock.__table__.create(connection, checkfirst=True)
+    inspector = inspect(connection)
+
+    columns = {
+        column["name"]
+        for column in inspector.get_columns("root_allocation_lock")
+    }
+    primary_key_columns = inspector.get_pk_constraint(
+        "root_allocation_lock"
+    ).get("constrained_columns") or []
+    if not {"id", "lock_version"}.issubset(columns) or (
+        primary_key_columns != ["id"]
+    ):
+        raise RuntimeError(
+            "The root allocation lock table has an unexpected schema; "
+            "inspect it manually before continuing"
+        )
+
+    insert = (
+        sqlite_insert
+        if connection.dialect.name == "sqlite"
+        else postgresql_insert
+        if connection.dialect.name == "postgresql"
+        else None
+    )
+    if insert is None:
+        raise RuntimeError(
+            "Root allocation locking is supported only on SQLite and PostgreSQL"
+        )
+
+    connection.execute(
+        insert(RootAllocationLock.__table__)
+        .values(id=1, lock_version=0)
+        .on_conflict_do_nothing(index_elements=["id"])
+    )
 
 def _normalize_predicate(predicate) -> str | None:
     if predicate is None:
@@ -280,6 +321,7 @@ def upgrade_schema(engine: Engine) -> None:
     """Apply safe, additive upgrades for schemas created before these models."""
     with engine.begin() as connection:
         inspector = inspect(connection)
+        _ensure_root_allocation_lock(connection)
         _add_consent_columns(connection, inspector)
 
         for table, index_name, columns, predicate in _UNIQUE_INDEXES:

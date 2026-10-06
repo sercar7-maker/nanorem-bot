@@ -5,6 +5,7 @@ from database.models_stats import PartnerStats
 from sqlalchemy import func
 from collections import deque
 from datetime import datetime
+from services.root_allocation_lock import acquire_root_allocation_lock
 
 
 class PartnerService:
@@ -36,9 +37,17 @@ class PartnerService:
         session = SessionLocal()
 
         try:
-            existing_count = session.query(Partner).count()
+            acquire_root_allocation_lock(session)
 
-            if existing_count < 2:
+            root_count = session.query(Partner).filter(
+                Partner.upline_id.is_(None)
+            ).count()
+            if root_count > 2:
+                raise RuntimeError(
+                    "More than two root partners already exist"
+                )
+
+            if root_count < 2:
                 upline_id = None
             elif not upline_id:
                 upline_id = self.choose_root(session)
@@ -103,6 +112,9 @@ class PartnerService:
 
             return partner
 
+        except Exception:
+            session.rollback()
+            raise
         finally:
             session.close()
 

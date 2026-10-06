@@ -91,6 +91,8 @@ DATABASE_URL=postgresql://user:password@localhost:5432/nanorem_mlm
 
 `init_db()` вызывает `create_all()` и безопасные schema upgrades. Он не заменяет versioned migration tool и не перестраивает существующие таблицы SQLite. На PostgreSQL старые `FLOAT` monetary/turnover columns преобразуются в `NUMERIC` с округлением до целевого scale; PostgreSQL DDL выполняется транзакционно, но перед migration всё равно необходимы backup и проверка объёмов/сумм.
 
+Создание партнёров сериализуется singleton-строкой `root_allocation_lock`. PostgreSQL блокирует эту существующую строку через `SELECT FOR UPDATE`; SQLite использует `UPDATE`, так как row-level locks там отсутствуют и writers сериализуются. Блокировка удерживается той же транзакцией, что и выбор root/upline и вставка партнёра, и освобождается при commit/rollback. `init_db()` безопасно создаёт таблицу и строку. Все ORM-пути создания партнёров приложения должны проходить через этот механизм; прямые SQL-вставки в обход приложения им не защищены.
+
 ### SQLite legacy FLOAT migration — только offline и на копии
 
 При старте migration выводит таблицы и колонки, которые остались `FLOAT`; существующую SQLite-схему автоматически не меняет. Для такой базы:

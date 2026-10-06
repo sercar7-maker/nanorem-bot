@@ -16,6 +16,7 @@ from core.commission import CommissionCalculator
 from services.distribution_service import DistributionService
 from services.stats_service import StatsService
 from services.rank_service import RankService
+from services.root_allocation_lock import acquire_root_allocation_lock
 
 logger = logging.getLogger(__name__)
 
@@ -227,6 +228,8 @@ class OrderProcessor:
                 f"{email}, ID={partner.id}"
             )
             return partner
+
+        acquire_root_allocation_lock(session)
 
         billing = order_data.get("billing", {})
 

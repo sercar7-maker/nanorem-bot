@@ -5,7 +5,7 @@ import enum
 import uuid
 
 from sqlalchemy import (
-    Column, Integer, String, Numeric, DateTime, ForeignKey,
+    CheckConstraint, Column, Integer, String, Numeric, DateTime, ForeignKey,
     Enum as SQLEnum, Text, Boolean, JSON, UniqueConstraint
 )
 from sqlalchemy.orm import relationship
@@ -116,6 +116,16 @@ class Partner(Base):
         "Withdrawal",
         back_populates="partner",
     )
+
+
+class RootAllocationLock(Base):
+    __tablename__ = "root_allocation_lock"
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_root_allocation_lock_singleton"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    lock_version = Column(Integer, nullable=False, default=0)
 
 
 # =========================

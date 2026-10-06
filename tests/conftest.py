@@ -43,6 +43,9 @@ def isolated_database(monkeypatch):
         cursor.close()
 
     Base.metadata.create_all(engine)
+    from database.migrations import upgrade_schema
+
+    upgrade_schema(engine)
     test_session = sessionmaker(bind=engine)
 
     monkeypatch.setattr(partner_service, "SessionLocal", test_session)

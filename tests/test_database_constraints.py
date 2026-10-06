@@ -18,7 +18,13 @@ from sqlalchemy.schema import CreateIndex
 
 from database.base import Base
 from database.migrations import upgrade_schema
-from database.models import Commission, Partner, Purchase, Withdrawal
+from database.models import (
+    Commission,
+    Partner,
+    Purchase,
+    RootAllocationLock,
+    Withdrawal,
+)
 from database.models_stats import PartnerStats
 from database.models_balance import (
     Balance,
@@ -68,6 +74,7 @@ def test_money_columns_use_numeric_types():
     )
     assert all(isinstance(column.type, Numeric) for column in monetary_columns)
     assert isinstance(Partner.__table__.c.consent_given.type, Boolean)
+    assert RootAllocationLock.__table__.primary_key.columns.keys() == ["id"]
 
 
 def test_sqlite_numeric_amount_round_trips_as_decimal(schema_session):
@@ -172,6 +179,15 @@ def test_commission_credit_index_compiles_for_postgresql():
 
     assert "CREATE UNIQUE INDEX uq_balance_tx_commission_reference" in compiled
     assert "WHERE type = 'COMMISSION' AND reference_id IS NOT NULL" in compiled
+
+
+def test_root_allocation_lock_allows_only_singleton_row(schema_session):
+    schema_session.add(
+        RootAllocationLock(id=2, lock_version=0)
+    )
+
+    with pytest.raises(IntegrityError):
+        schema_session.flush()
 
 
 def test_commission_is_unique_per_purchase_level(schema_session):
@@ -279,6 +295,11 @@ def test_legacy_schema_upgrade_is_idempotent():
         index["name"] == "uq_balance_tx_commission_reference"
         for index in inspector.get_indexes("balance_transactions")
     )
+    assert inspector.has_table("root_allocation_lock")
+    with engine.connect() as connection:
+        assert connection.execute(
+            text("SELECT id FROM root_allocation_lock")
+        ).scalar_one() == 1
 
     engine.dispose()
 
