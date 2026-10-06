@@ -76,6 +76,11 @@ uvicorn web.app:app --host 0.0.0.0 --port 8000 --workers 1
 
 For Telegram polling instead, run `python -m tg_handlers.bot`; do not run polling and webhook modes for the same bot simultaneously. See [INSTALL.md](./INSTALL.md) for the required webhook secrets and WooCommerce setup. Never commit `.env`.
 
+## Database environments
+
+- **Development/tests:** isolated SQLite. Money is represented with `Decimal`/`Numeric` in the ORM, but SQLite does not provide PostgreSQL-equivalent exact fixed-point guarantees.
+- **Production target:** PostgreSQL with `NUMERIC` monetary columns. PostgreSQL integration and production migration have not yet been run or certified; see the backup, migration, and validation requirements in [INSTALL.md](./INSTALL.md).
+
 ## Contributing
 
 Contributions are welcome. Please:

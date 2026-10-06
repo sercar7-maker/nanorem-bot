@@ -65,8 +65,12 @@ class BalanceTransaction(Base):
             "partner_id",
             "reference_id",
             unique=True,
-            sqlite_where=text("type = 'COMMISSION'"),
-            postgresql_where=text("type = 'COMMISSION'"),
+            sqlite_where=text(
+                "type = 'COMMISSION' AND reference_id IS NOT NULL"
+            ),
+            postgresql_where=text(
+                "type = 'COMMISSION' AND reference_id IS NOT NULL"
+            ),
         ),
     )
 

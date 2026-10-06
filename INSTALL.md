@@ -3,7 +3,8 @@
 ## Требования
 
 - Python 3.10 или выше
-- PostgreSQL 12 или выше (или SQLite для разработки)
+- SQLite для разработки и unit tests
+- PostgreSQL 12+ для целевого production-развёртывания (`psycopg2-binary`)
 - Git
 - Telegram Bot Token (от @BotFather)
 
@@ -71,6 +72,37 @@ WOOCOMMERCE_WEBHOOK_SECRET=your_woocommerce_webhook_secret
 ```
 
 ## Шаг 5: Инициализация базы данных
+
+### DEVELOPMENT — SQLite
+
+SQLite используется для локальной разработки и изолированных тестов. Новые ORM-модели объявляют денежные поля как `Numeric` и используют Python `Decimal`, но SQLite не предоставляет такую же строгую fixed-point арифметику, как PostgreSQL. Не используйте SQLite как подтверждённый финансовый production backend.
+
+```env
+DATABASE_URL=sqlite:///nanorem.db
+```
+
+### PRODUCTION TARGET — PostgreSQL
+
+```env
+DATABASE_URL=postgresql://user:password@localhost:5432/nanorem_mlm
+```
+
+Модели используют `NUMERIC(18,2)` для денежных сумм и turnover, `NUMERIC(5,4)` для ставок. PostgreSQL production compatibility пока не сертифицирована: integration tests против отдельной PostgreSQL test database не запускались. Сначала проверьте схему, миграцию копии реальных данных и финансовые тесты на отдельном PostgreSQL instance; не направляйте тесты или миграции на production URL.
+
+`init_db()` вызывает `create_all()` и безопасные schema upgrades. Он не заменяет versioned migration tool и не перестраивает существующие таблицы SQLite. На PostgreSQL старые `FLOAT` monetary/turnover columns преобразуются в `NUMERIC` с округлением до целевого scale; PostgreSQL DDL выполняется транзакционно, но перед migration всё равно необходимы backup и проверка объёмов/сумм.
+
+### SQLite legacy FLOAT migration — только offline и на копии
+
+При старте migration выводит таблицы и колонки, которые остались `FLOAT`; существующую SQLite-схему автоматически не меняет. Для такой базы:
+
+1. Остановите все процессы приложения и убедитесь, что нет активных writers.
+2. Создайте проверенную резервную копию SQLite через SQLite backup API (не копируйте только основной файл работающей WAL-базы).
+3. Сделайте отдельную рабочую копию backup. Никогда не проводите экспериментальную миграцию на единственном оригинале.
+4. На рабочей копии создайте новую БД с текущими ORM-моделями. Перенесите все строки, сохраняя primary keys, foreign keys, enum/JSON содержимое и все прочие колонки; для денежных полей явно преобразуйте legacy значения с согласованным округлением до двух знаков.
+5. Сверьте число строк каждой таблицы, IDs, агрегаты денежных колонок, уникальные ключи и связи. Выполните `PRAGMA integrity_check` и `PRAGMA foreign_key_check`; повторно запустите unit tests и бизнес-проверки на копии.
+6. Переключайте приложение на новую БД только после review результата. Сохраните исходную БД и backup до завершения production-проверки.
+
+Не используйте `ALTER COLUMN` для SQLite: эта операция не выполняет rebuild. Не удаляйте и не объединяйте дубликаты для прохождения миграции. Если при добавлении unique index найдены дубли, `init_db()` остановится с именем таблицы/индекса и диагностическим `SELECT ... GROUP BY ... HAVING COUNT(*) > 1`; устранение конфликтов должно быть отдельным согласованным data-cleanup.
 
 ```bash
 # Создайте базу данных PostgreSQL

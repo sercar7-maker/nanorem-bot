@@ -1,5 +1,27 @@
+from sqlalchemy import cast, exists, func, select
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
+
 from database.models import Partner
+
+
+def _lineage_contains(partner_id: int, dialect_name: str):
+    if dialect_name == "postgresql":
+        return cast(Partner.lineage, JSONB).contains([partner_id])
+
+    if dialect_name == "sqlite":
+        lineage_item = func.json_each(
+            Partner.lineage
+        ).table_valued("key", "value")
+        return exists(
+            select(1)
+            .select_from(lineage_item)
+            .where(lineage_item.c.value == partner_id)
+        )
+
+    raise RuntimeError(
+        f"Network lineage queries are not supported for {dialect_name}"
+    )
 
 
 class NetworkTreeService:
@@ -36,10 +58,14 @@ class NetworkTreeService:
     # -------------------------------------------------
 
     def get_network_tree(self, partner_id: int):
-
         partners = (
             self.session.query(Partner)
-            .filter(Partner.lineage.contains([partner_id]))
+            .filter(
+                _lineage_contains(
+                    partner_id,
+                    self.session.bind.dialect.name,
+                )
+            )
             .all()
         )
 

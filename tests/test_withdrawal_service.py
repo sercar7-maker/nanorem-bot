@@ -10,6 +10,30 @@ from core.balance_service import BalanceService
 from services.withdrawal_service import WithdrawalService
 
 
+def test_withdrawal_preserves_decimal_amount(isolated_database):
+    session = isolated_database()
+    partner = Partner(first_name="Decimal Withdrawal Test")
+    session.add(partner)
+    session.flush()
+
+    balance_service = BalanceService(session)
+    balance_service.add_funds(
+        partner_id=partner.id,
+        amount=Decimal("1.00"),
+        tx_type=BalanceTransactionType.ADJUSTMENT,
+    )
+
+    withdrawal = WithdrawalService(session).create_pending(
+        partner_id=partner.id,
+        amount=Decimal("0.29"),
+    )
+    balance = balance_service._get_balance(partner.id)
+
+    assert Decimal(str(withdrawal.amount)) == Decimal("0.29")
+    assert balance.amount == Decimal("0.71")
+    session.close()
+
+
 def test_withdrawal_complete():
     session = SessionLocal()
 

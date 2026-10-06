@@ -175,7 +175,7 @@ def get_transactions(
 )
 def withdraw(
     partner_id: int,
-    amount: float,
+    amount: Decimal,
     db: Session = Depends(get_db)
 ):
     try:
@@ -183,7 +183,7 @@ def withdraw(
 
         withdrawal = service.create_pending(
             partner_id=partner_id,
-            amount=Decimal(str(amount)),
+            amount=amount,
             method="manual",
             details={"info": "web withdrawal"},
         )
@@ -219,7 +219,7 @@ def withdraw(
 )
 async def test_order(
     partner_id: int,
-    amount: float,
+    amount: Decimal,
     db: Session = Depends(get_db)
 ):
     existing = db.query(Purchase).filter(

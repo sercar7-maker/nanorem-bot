@@ -47,7 +47,7 @@ class WithdrawalService:
 
         withdrawal = Withdrawal(
             partner_id=partner_id,
-            amount=float(amount),
+            amount=amount,
             method=method,
             details=details or {},
             status=WithdrawalStatus.PENDING,
