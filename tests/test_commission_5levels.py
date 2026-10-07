@@ -1,4 +1,5 @@
 ﻿from decimal import Decimal
+from datetime import datetime, timedelta
 from unittest.mock import Mock
 
 from database.db import SessionLocal
@@ -8,6 +9,7 @@ from core.commission import CommissionCalculator
 
 def test_commission_5_levels():
     session = SessionLocal()
+    active_until = datetime.utcnow() + timedelta(days=365)
 
     try:
         # Создаем цепочку:
@@ -15,31 +17,37 @@ def test_commission_5_levels():
         root = Partner(
             first_name="Test Root",
             username="test_root",
+            subscription_end_date=active_until,
         )
 
         partner_a = Partner(
             first_name="Test A",
             username="test_a",
+            subscription_end_date=active_until,
         )
 
         partner_b = Partner(
             first_name="Test B",
             username="test_b",
+            subscription_end_date=active_until,
         )
 
         partner_c = Partner(
             first_name="Test C",
             username="test_c",
+            subscription_end_date=active_until,
         )
 
         partner_d = Partner(
             first_name="Test D",
             username="test_d",
+            subscription_end_date=active_until,
         )
 
         partner_e = Partner(
             first_name="Test E",
             username="test_e",
+            subscription_end_date=active_until,
         )
 
         buyer = Partner(
@@ -140,6 +148,10 @@ def test_commission_compression_skips_inactive_partners():
         ])
         session.flush()
 
+        for active_partner in (active_1, active_2, active_3):
+            active_partner.subscription_end_date = (
+                datetime.utcnow() + timedelta(days=365)
+            )
         inactive_1.status = PartnerStatus.INACTIVE
         inactive_2.status = PartnerStatus.INACTIVE
         session.flush()
@@ -192,6 +204,9 @@ def test_commission_chain_never_pays_the_buying_partner():
         upline = Partner(
             first_name="Self Commission Upline",
             username="self_commission_upline",
+            subscription_end_date=(
+                datetime.utcnow() + timedelta(days=365)
+            ),
         )
         session.add_all([buyer, upline])
         session.flush()
@@ -217,13 +232,23 @@ def test_compression_assigns_nearest_active_ancestors_to_payout_levels():
     session = SessionLocal()
 
     try:
-        root = Partner(first_name="Compression Scenario Root")
-        active_a = Partner(first_name="Compression Scenario A")
+        active_until = datetime.utcnow() + timedelta(days=365)
+        root = Partner(
+            first_name="Compression Scenario Root",
+            subscription_end_date=active_until,
+        )
+        active_a = Partner(
+            first_name="Compression Scenario A",
+            subscription_end_date=active_until,
+        )
         inactive_b = Partner(
             first_name="Compression Scenario B",
             status=PartnerStatus.INACTIVE,
         )
-        active_c = Partner(first_name="Compression Scenario C")
+        active_c = Partner(
+            first_name="Compression Scenario C",
+            subscription_end_date=active_until,
+        )
         buyer_d = Partner(first_name="Compression Scenario D")
         session.add_all([root, active_a, inactive_b, active_c, buyer_d])
         session.flush()

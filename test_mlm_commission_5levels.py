@@ -11,6 +11,8 @@
 from database.db import SessionLocal
 from database.models import Partner, Purchase, Commission, OrderStatus
 from core.commission import CommissionCalculator
+from config import DATABASE_URL
+from core.manual_test_guard import require_ephemeral_test_database
 import uuid
 
 
@@ -55,6 +57,7 @@ def create_test_partner_direct(session, telegram_id: str, upline_id: int = None)
 
 
 async def run_5level_test():
+    require_ephemeral_test_database(DATABASE_URL)
     session = SessionLocal()
 
     try:

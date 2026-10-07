@@ -120,6 +120,18 @@ def test_purchase_external_reference_is_unique(schema_session):
         schema_session.flush()
 
 
+def test_partner_email_is_unique(schema_session):
+    schema_session.add_all(
+        [
+            Partner(first_name="First email owner", email="buyer@example.test"),
+            Partner(first_name="Second email owner", email="BUYER@example.test"),
+        ]
+    )
+
+    with pytest.raises(IntegrityError):
+        schema_session.flush()
+
+
 def test_partner_and_purchase_foreign_keys_are_enforced(schema_session):
     schema_session.add(
         Purchase(
@@ -179,6 +191,21 @@ def test_commission_credit_index_compiles_for_postgresql():
 
     assert "CREATE UNIQUE INDEX uq_balance_tx_commission_reference" in compiled
     assert "WHERE type = 'COMMISSION' AND reference_id IS NOT NULL" in compiled
+
+
+def test_partner_email_index_compiles_for_postgresql():
+    index = next(
+        index
+        for index in Partner.__table__.indexes
+        if index.name == "uq_partners_email_normalized"
+    )
+
+    compiled = str(
+        CreateIndex(index).compile(dialect=postgresql.dialect())
+    ).lower()
+
+    assert "create unique index uq_partners_email_normalized" in compiled
+    assert "lower(email)" in compiled
 
 
 def test_root_allocation_lock_allows_only_singleton_row(schema_session):
@@ -311,7 +338,7 @@ def test_legacy_schema_upgrade_adds_missing_model_unique_keys():
             text(
                 "CREATE TABLE partners "
                 "(id INTEGER PRIMARY KEY, telegram_id VARCHAR, "
-                "telegram_link_code VARCHAR)"
+                "telegram_link_code VARCHAR, email VARCHAR)"
             )
         )
         connection.execute(
@@ -376,6 +403,17 @@ def test_legacy_schema_upgrade_adds_missing_model_unique_keys():
         )
         assert expected_keys.issubset(actual_keys)
 
+    with engine.connect() as connection:
+        email_index_sql = connection.execute(
+            text(
+                "SELECT sql FROM sqlite_master "
+                "WHERE type = 'index' "
+                "AND name = 'uq_partners_email_normalized'"
+            )
+        ).scalar_one()
+    assert "CREATE UNIQUE INDEX" in email_index_sql
+    assert "lower(email)" in email_index_sql
+
     transaction_index = next(
         index
         for index in inspector.get_indexes("balance_transactions")
@@ -417,6 +455,35 @@ def test_migration_refuses_duplicates_without_deleting_rows():
     with engine.connect() as connection:
         assert connection.execute(
             text("SELECT COUNT(*) FROM purchases")
+        ).scalar_one() == 2
+    engine.dispose()
+
+
+def test_migration_refuses_duplicate_partner_emails_without_deleting_rows():
+    engine = create_engine("sqlite://")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE partners "
+                "(id INTEGER PRIMARY KEY, email VARCHAR)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO partners (email) VALUES "
+                "('Buyer@example.test'), ('buyer@example.test')"
+            )
+        )
+
+    with pytest.raises(
+        RuntimeError,
+        match="duplicate rows exist.*case-insensitive email",
+    ):
+        upgrade_schema(engine)
+
+    with engine.connect() as connection:
+        assert connection.execute(
+            text("SELECT COUNT(*) FROM partners")
         ).scalar_one() == 2
     engine.dispose()
 

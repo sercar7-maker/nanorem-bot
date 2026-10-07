@@ -28,7 +28,10 @@ from core.commission import CommissionCalculator
 from core.security_tokens import create_telegram_binding_token
 from services.notifications import NotificationService
 from tg_handlers.handlers import setup_handlers
-from services.order_processor import OrderProcessor
+from services.order_processor import (
+    OrderProcessor,
+    RootPairNotReadyError,
+)
 from scheduler import start_scheduler, stop_scheduler
 
 logger = logging.getLogger(__name__)
@@ -141,21 +144,14 @@ async def register_user(
     upline_id = None
 
     if ref and ref != "None" and ref.strip():
-        try:
-            upline_id = int(ref)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid referral",
-            ) from exc
-
         with get_session() as session:
-            if not session.query(Partner.id).filter(
-                Partner.id == upline_id
-            ).first():
+            upline_id = session.query(Partner.id).filter(
+                Partner.referral_code == ref.strip()
+            ).scalar()
+            if upline_id is None:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Referral partner not found",
+                    detail="Referral code not found",
                 )
 
     from services.partner_service import PartnerService
@@ -175,7 +171,12 @@ async def register_user(
             consent_version="v.1.0 21.04.2026",
             consent_date=datetime.utcnow(),
         )
-    except (ValueError, IntegrityError) as exc:
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except IntegrityError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Unable to create partner",
@@ -373,6 +374,12 @@ async def webhook_endpoint(
 
     except HTTPException:
         raise
+
+    except RootPairNotReadyError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc),
+        ) from exc
 
     except Exception as e:
         logger.exception(

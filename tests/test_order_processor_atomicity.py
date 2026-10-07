@@ -8,6 +8,28 @@ from services import order_processor
 from services.order_processor import OrderProcessor
 
 
+def test_woocommerce_email_mapping_is_case_insensitive(isolated_database):
+    session = isolated_database()
+    partner = Partner(
+        first_name="Existing customer",
+        email="Buyer@Example.Test",
+    )
+    session.add(partner)
+    session.commit()
+    partner_id = partner.id
+
+    mapped_partner = OrderProcessor()._find_or_create_partner(
+        session,
+        woo_customer_id=77,
+        email=" buyer@example.test ",
+        order_data={"billing": {}},
+    )
+
+    assert mapped_partner.id == partner_id
+    assert session.query(Partner).count() == 1
+    session.close()
+
+
 def test_failed_commission_rolls_back_partner_purchase_and_commission(
     isolated_database,
     monkeypatch,

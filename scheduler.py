@@ -1,11 +1,11 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
-from sqlalchemy import update
-
 from database.db import SessionLocal
-from database.models import Partner, PartnerStatus
 from services.monthly_reset_service import MonthlyResetService
+from services.structural_compression_service import (
+    StructuralCompressionService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -19,19 +19,13 @@ scheduler = BackgroundScheduler(timezone="UTC")
 def expire_statuses():
     session = SessionLocal()
     try:
-        result = session.execute(
-            update(Partner)
-            .where(
-                Partner.status == PartnerStatus.ACTIVE,
-                Partner.subscription_end_date.is_not(None),
-                Partner.subscription_end_date <= datetime.utcnow(),
-            )
-            .values(status=PartnerStatus.INACTIVE)
-        )
+        expired_count = StructuralCompressionService(
+            session
+        ).expire_due_partners(datetime.now(timezone.utc))
         session.commit()
         logger.info(
-            "[Scheduler] Expired %s partner subscriptions",
-            result.rowcount,
+            "[Scheduler] Expired and compressed %s partner subscriptions",
+            expired_count,
         )
     except Exception:
         session.rollback()
@@ -55,11 +49,11 @@ def daily_summary():
 
 def setup_scheduler():
 
-    # Every hour
+    # Process expirations frequently so structural compression follows expiry.
     scheduler.add_job(
         expire_statuses,
         "interval",
-        hours=1,
+        minutes=1,
         id="expire_statuses",
         replace_existing=True,
     )

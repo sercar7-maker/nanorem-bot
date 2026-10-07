@@ -1,6 +1,6 @@
 import logging
 import time
-from telegram.ext import MessageHandler, CommandHandler, filters
+from telegram.ext import MessageHandler, filters
 
 from services.partner_service import PartnerService
 from services.rank_service import RankService
@@ -24,79 +24,6 @@ def _should_skip(telegram_id: str) -> bool:
         return True
     _last_message_time[telegram_id] = now
     return False
-
-
-# -------------------------------------------------
-# TEST ORDER
-# -------------------------------------------------
-async def test_order(update, context):
-    print("TEST ORDER CALLED")
-
-    telegram_id = str(update.effective_user.id)
-    
-    # Защита от двойных нажатий
-    if _should_skip(telegram_id):
-        print(f"⏭️ Skipped duplicate from {telegram_id}")
-        return
-
-    session = SessionLocal()
-
-    try:
-        # 👉 находим покупателя (текущий пользователь)
-        buyer = (
-            session.query(Partner)
-            .filter(Partner.telegram_id == telegram_id)
-            .first()
-        )
-
-        if not buyer:
-            await update.message.reply_text("Вы не зарегистрированы")
-            return
-
-        # 👉 находим любого партнёра ПОД покупателем
-        partner = (
-            session.query(Partner)
-            .filter(Partner.upline_id == buyer.id)
-            .first()
-        )
-
-        if not partner:
-            await update.message.reply_text(
-                "❌ Нет партнёров под вами для теста"
-            )
-            return
-
-        # Импортируем нужные модели и калькулятор
-        from database.models import Purchase, OrderStatus
-        from core.commission import CommissionCalculator
-        
-        # Создаём тестовую покупку
-        purchase = Purchase(
-            purchase_number=f"TEST-{partner.id}-1000",
-            partner_id=partner.id,
-            amount=1000.0,
-            status=OrderStatus.PAID,
-        )
-        session.add(purchase)
-        session.flush()
-
-        # Запускаем расчёт комиссий
-        calculator = CommissionCalculator(session, context.bot)
-        await calculator.process_purchase(purchase)
-        session.commit()
-
-        await update.message.reply_text(
-            "🎉 Заказ от нижнего партнёра обработан"
-        )
-
-    except Exception as e:
-        print(f"❌ Ошибка в test_order: {e}")
-        import traceback
-        traceback.print_exc()
-        await update.message.reply_text(f"❌ Ошибка: {e}")
-
-    finally:
-        session.close()
 
 
 # -------------------------------------------------
@@ -165,10 +92,10 @@ async def button_handler(update, context):
             await update.message.reply_text(message)
 
         elif text == "🔗 Реферальная ссылка":
-            link_code = partner.telegram_link_code
             message = (
                 "🔗 Ваша ссылка\n\n"
-                f"https://nanorvs.ru/register?ref={partner.id}\n\n"
+                "https://nanorvs.ru/register?ref="
+                f"{partner.referral_code}\n\n"
                 "Приглашайте партнёров и зарабатывайте 💰"
             )
             await update.message.reply_text(message)
@@ -203,7 +130,6 @@ def setup_handlers(application):
 
     application.add_handler(start_handler())
 
-    application.add_handler(CommandHandler("test_order", test_order))
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, button_handler)
     )

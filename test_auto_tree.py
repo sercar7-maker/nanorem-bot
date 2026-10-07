@@ -1,9 +1,12 @@
 from services.partner_service import PartnerService
 from database.db import SessionLocal
 from database.models import Partner
+from config import DATABASE_URL
+from core.manual_test_guard import require_ephemeral_test_database
 
 
 def run_test():
+    require_ephemeral_test_database(DATABASE_URL)
     session = SessionLocal()
     service = PartnerService()
 

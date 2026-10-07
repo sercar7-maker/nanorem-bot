@@ -4,7 +4,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Tuple, Optional
 
 
-from database.models import Commission, Purchase, Partner, PartnerStatus
+from database.models import Commission, Purchase, Partner
 from services.notifications import NotificationService
 from services.commission_service import CommissionService
 
@@ -52,8 +52,7 @@ class CommissionCalculator:
         )
         if not partner:
             return False
-        # РџСЂРµРґРїРѕР»Р°РіР°РµРј, С‡С‚Рѕ РІ РјРѕРґРµР»Рё Partner РµСЃС‚СЊ РїРѕР»Рµ is_active
-        return partner.status == PartnerStatus.ACTIVE
+        return partner.is_active
 
 
     def _build_compressed_chain(

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 
 from core.security_tokens import (
     TELEGRAM_BINDING_TOKEN_TTL_SECONDS,
@@ -14,7 +15,9 @@ from core.security_tokens import (
 from database.models import Partner
 from services.partner_service import PartnerService
 from tg_handlers import start
+from tg_handlers import handlers
 from web import app as web_app
+from web import order_handler
 
 
 def seed_roots(session_factory):
@@ -28,6 +31,14 @@ def seed_roots(session_factory):
     root_ids = [root.id for root in roots]
     session.close()
     return root_ids
+
+
+def get_referral_code(session_factory, partner_id):
+    session = session_factory()
+    try:
+        return session.get(Partner, partner_id).referral_code
+    finally:
+        session.close()
 
 
 def make_update(telegram_id, text, first_name="Telegram User"):
@@ -44,26 +55,30 @@ def make_update(telegram_id, text, first_name="Telegram User"):
     )
 
 
-def test_registration_referral_is_partner_id_and_binding_token_is_distinct(
+def test_registration_referral_uses_referral_code_and_binding_token_is_distinct(
     isolated_database,
 ):
     root_ids = seed_roots(isolated_database)
+    root_referral_code = get_referral_code(
+        isolated_database,
+        root_ids[0],
+    )
 
     response = asyncio.run(
         web_app.register_user(
             request=Mock(),
             first_name="Referral",
             last_name="Partner",
-            email="referral@example.test",
+            email=" Referral@Example.Test ",
             phone="+10000000001",
-            ref=str(root_ids[0]),
+            ref=root_referral_code,
             consent="on",
         )
     )
     token_match = re.search(r"start=([A-Za-z0-9_.-]+)", response.body.decode())
     assert token_match
     binding_token = token_match.group(1)
-    assert binding_token != str(root_ids[0])
+    assert binding_token != root_referral_code
     assert is_telegram_binding_token_valid(binding_token)
 
     session = isolated_database()
@@ -74,6 +89,9 @@ def test_registration_referral_is_partner_id_and_binding_token_is_distinct(
         assert partner.upline_id == root_ids[0]
         assert partner.lineage == [root_ids[0]]
         assert partner.telegram_link_code == binding_token
+        assert partner.referral_code
+        assert partner.referral_code != str(partner.id)
+        assert partner.referral_code != partner.telegram_link_code
         assert partner.consent_given is True
         assert partner.consent_version == "v.1.0 21.04.2026"
         assert partner.consent_date is not None
@@ -90,7 +108,7 @@ def test_registration_rejects_unknown_referral(isolated_database):
                 last_name="Referral",
                 email="bad-referral@example.test",
                 phone="+10000000002",
-                ref="999999",
+                ref="unknown-referral-code",
                 consent="on",
             )
         )
@@ -100,6 +118,10 @@ def test_registration_rejects_unknown_referral(isolated_database):
 
 def test_registration_requires_consent_on_server(isolated_database):
     root_ids = seed_roots(isolated_database)
+    root_referral_code = get_referral_code(
+        isolated_database,
+        root_ids[0],
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(
@@ -109,7 +131,7 @@ def test_registration_requires_consent_on_server(isolated_database):
                 last_name="Consent",
                 email="no-consent@example.test",
                 phone="+10000000004",
-                ref=str(root_ids[0]),
+                ref=root_referral_code,
                 consent=None,
             )
         )
@@ -127,15 +149,149 @@ def test_registration_requires_consent_on_server(isolated_database):
 def test_partner_service_rejects_unknown_upline(isolated_database):
     seed_roots(isolated_database)
 
-    with pytest.raises(ValueError, match="Реферальный партнёр не найден"):
+    with pytest.raises(ValueError, match="Referral partner not found"):
         PartnerService().create_partner(
             telegram_id=None,
             upline_id=999999,
         )
 
 
+def test_referral_codes_are_unique_and_generated_for_roots_and_partners(
+    isolated_database,
+):
+    root_ids = seed_roots(isolated_database)
+    first_code, second_code = (
+        get_referral_code(isolated_database, partner_id)
+        for partner_id in root_ids
+    )
+    assert first_code
+    assert second_code
+    assert first_code != second_code
+
+    partner = PartnerService().create_partner(
+        telegram_id=None,
+        upline_id=root_ids[0],
+        first_name="Automatically coded partner",
+    )
+    assert partner.referral_code
+    assert partner.referral_code not in {first_code, second_code}
+
+    session = isolated_database()
+    duplicate = Partner(
+        first_name="Duplicate referral code",
+        referral_code=partner.referral_code,
+    )
+    session.add(duplicate)
+    with pytest.raises(IntegrityError):
+        session.flush()
+    session.rollback()
+    session.close()
+
+
+def test_referral_code_can_be_reused_for_multiple_registrations(
+    isolated_database,
+):
+    root_ids = seed_roots(isolated_database)
+    root_code = get_referral_code(isolated_database, root_ids[0])
+
+    for name, email in (
+        ("First referred", "first-referred@example.test"),
+        ("Second referred", "second-referred@example.test"),
+    ):
+        asyncio.run(
+            web_app.register_user(
+                request=Mock(),
+                first_name=name,
+                last_name="Partner",
+                email=email,
+                phone="",
+                ref=root_code,
+                consent="on",
+            )
+        )
+
+    session = isolated_database()
+    try:
+        referred = session.query(Partner).filter(
+            Partner.email.in_(
+                ["first-referred@example.test", "second-referred@example.test"]
+            )
+        ).all()
+        assert len(referred) == 2
+        assert {partner.upline_id for partner in referred} == {root_ids[0]}
+        assert all(partner.referral_code != root_code for partner in referred)
+    finally:
+        session.close()
+
+
+def test_numeric_partner_id_is_not_a_referral_code(isolated_database):
+    root_ids = seed_roots(isolated_database)
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            web_app.register_user(
+                request=Mock(),
+                first_name="Legacy numeric referral",
+                last_name="Rejected",
+                email="legacy-numeric@example.test",
+                phone="",
+                ref=str(root_ids[0]),
+                consent="on",
+            )
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "Referral code not found"
+
+
+def test_admin_referral_link_uses_referral_code(isolated_database):
+    root_ids = seed_roots(isolated_database)
+    session = isolated_database()
+    try:
+        result = order_handler.get_referral_link(root_ids[0], session)
+        referral_code = session.get(Partner, root_ids[0]).referral_code
+        assert result["referral_code"] == referral_code
+        assert result["referral_link"] == (
+            f"https://nanorvs.ru/register?ref={referral_code}"
+        )
+        assert result["referral_link"] != (
+            f"https://nanorvs.ru/register?ref={root_ids[0]}"
+        )
+    finally:
+        session.close()
+
+
+def test_telegram_referral_button_uses_referral_code(
+    isolated_database,
+    monkeypatch,
+):
+    monkeypatch.setattr(handlers, "SessionLocal", isolated_database)
+    telegram_id = 918273
+    session = isolated_database()
+    partner = Partner(
+        first_name="Telegram referrer",
+        telegram_id=str(telegram_id),
+    )
+    session.add(partner)
+    session.commit()
+    partner_id = partner.id
+    referral_code = partner.referral_code
+    session.close()
+    update = make_update(telegram_id, "🔗 Реферальная ссылка")
+
+    asyncio.run(handlers.button_handler(update, Mock()))
+
+    message = update.message.reply_text.await_args.args[0]
+    assert f"https://nanorvs.ru/register?ref={referral_code}" in message
+    assert f"https://nanorvs.ru/register?ref={partner_id}" not in message
+
+
 def test_telegram_binding_token_is_one_time_and_cleared(isolated_database):
     root_ids = seed_roots(isolated_database)
+    root_referral_code = get_referral_code(
+        isolated_database,
+        root_ids[0],
+    )
     asyncio.run(
         web_app.register_user(
             request=Mock(),
@@ -143,7 +299,7 @@ def test_telegram_binding_token_is_one_time_and_cleared(isolated_database):
             last_name="Partner",
             email="binding@example.test",
             phone="+10000000003",
-            ref=str(root_ids[0]),
+            ref=root_referral_code,
             consent="on",
         )
     )

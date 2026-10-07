@@ -1,3 +1,5 @@
+from sqlalchemy import or_
+
 from database.models import Partner
 
 
@@ -5,7 +7,13 @@ class DistributionService:
     def get_upline_for_new_partner(self, session):
         roots = (
             session.query(Partner)
-            .filter(Partner.upline_id.is_(None))
+            .filter(
+                Partner.upline_id.is_(None),
+                or_(
+                    Partner.root_id.is_(None),
+                    Partner.root_id == Partner.id,
+                ),
+            )
             .order_by(Partner.id)
             .all()
         )

@@ -10,6 +10,7 @@ from database.db import get_db
 from database.models import (
     Purchase,
     OrderStatus,
+    Partner,
 )
 from database.models_balance import Balance, BalanceTransaction
 
@@ -68,10 +69,16 @@ def create_partner(
 ):
     service = PartnerService()
 
-    partner = service.create_partner(
-        telegram_id=telegram_id,
-        upline_id=ref
-    )
+    try:
+        partner = service.create_partner(
+            telegram_id=telegram_id,
+            upline_id=ref
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
 
     return {
         "id": partner.id,
@@ -80,14 +87,53 @@ def create_partner(
     }
 
 
+@router.post(
+    "/create-root",
+    dependencies=[Depends(require_admin_secret)],
+)
+def create_root(
+    first_name: str | None = None,
+    last_name: str | None = None,
+    email: str | None = None,
+    phone: str | None = None,
+):
+    try:
+        partner = PartnerService().create_root(
+            first_name=first_name,
+            last_name=last_name,
+            email=email,
+            phone=phone,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    return {
+        "id": partner.id,
+        "root_id": partner.root_id,
+        "upline_id": partner.upline_id,
+    }
+
+
 @router.get(
     "/referral-link",
     dependencies=[Depends(require_admin_secret)],
 )
-def get_referral_link(partner_id: int):
+def get_referral_link(
+    partner_id: int,
+    db: Session = Depends(get_db),
+):
+    partner = db.get(Partner, partner_id)
+    if partner is None:
+        raise HTTPException(status_code=404, detail="Partner not found")
     return {
         "partner_id": partner_id,
-        "referral_link": f"{BASE_URL}/register?ref={partner_id}"
+        "referral_code": partner.referral_code,
+        "referral_link": (
+            f"{BASE_URL}/register?ref={partner.referral_code}"
+        ),
     }
 
 

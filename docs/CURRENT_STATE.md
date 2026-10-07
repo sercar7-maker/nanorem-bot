@@ -36,7 +36,6 @@ Python + httpx + системный прокси (Hiddify)
 
 /start
 /balance
-/test_order
 
 ---
 
@@ -92,7 +91,7 @@ Python + httpx + системный прокси (Hiddify)
 
 ## Текущее поведение
 
-* тестовая сеть создаётся через `test_mlm.py`
+* legacy MLM scripts допускаются только с `DATABASE_URL=sqlite://` (ephemeral in-memory DB); не запускайте их с файловой или production БД.
 * комиссии начисляются
 * статистика отображается
 
@@ -325,7 +324,7 @@ for key in [
 
 * /start
 * кнопки
-* test_order
+* test_order больше не зарегистрирован: эта тестовая команда создавала реальные покупки и начисляла комиссии.
 
 ---
 

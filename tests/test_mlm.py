@@ -6,6 +6,8 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from database.db import SessionLocal
 from database.models import Partner, Purchase, OrderStatus
 from core.commission import CommissionCalculator
+from config import DATABASE_URL
+from core.manual_test_guard import require_ephemeral_test_database
 
 
 class FakeBot:
@@ -14,6 +16,7 @@ class FakeBot:
 
 
 def main():
+    require_ephemeral_test_database(DATABASE_URL)
     session = SessionLocal()
 
     # 1. найти тебя

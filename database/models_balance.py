@@ -9,6 +9,8 @@ from sqlalchemy import (
     func,
     Index,
     text,
+    CheckConstraint,
+    UniqueConstraint,
 )
 
 from sqlalchemy.orm import relationship
@@ -21,6 +23,13 @@ class BalanceTransactionType(Enum):
     COMMISSION = "commission"
     WITHDRAWAL = "withdrawal"
     ADJUSTMENT = "adjustment"
+    PURCHASE_PAYMENT = "purchase_payment"
+
+
+class BalanceOrderReservationStatus(Enum):
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    RELEASED = "released"
 
 
 class Balance(Base):
@@ -72,6 +81,18 @@ class BalanceTransaction(Base):
                 "type = 'COMMISSION' AND reference_id IS NOT NULL"
             ),
         ),
+        Index(
+            "uq_balance_tx_purchase_external_id",
+            "partner_id",
+            "external_id",
+            unique=True,
+            sqlite_where=text(
+                "type = 'PURCHASE_PAYMENT' AND external_id IS NOT NULL"
+            ),
+            postgresql_where=text(
+                "type = 'PURCHASE_PAYMENT' AND external_id IS NOT NULL"
+            ),
+        ),
     )
 
     id = Column(Integer, primary_key=True)
@@ -108,3 +129,45 @@ class BalanceTransaction(Base):
         "Balance",
         back_populates="transactions"
     )
+
+
+class BalanceOrderReservation(Base):
+    __tablename__ = "balance_order_reservations"
+    __table_args__ = (
+        UniqueConstraint(
+            "order_id",
+            name="uq_balance_order_reservations_order_id",
+        ),
+        CheckConstraint(
+            "order_total > 0 AND amount >= 0 AND amount <= order_total",
+            name="ck_balance_order_reservation_amounts",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+
+    order_id = Column(String(100), nullable=False)
+
+    partner_id = Column(
+        Integer,
+        ForeignKey("partners.id"),
+        nullable=False,
+        index=True,
+    )
+
+    order_total = Column(Numeric(18, 2), nullable=False)
+    amount = Column(Numeric(18, 2), nullable=False, default=0)
+
+    status = Column(
+        SQLAlchemyEnum(BalanceOrderReservationStatus),
+        nullable=False,
+        default=BalanceOrderReservationStatus.PENDING,
+    )
+
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    processed_at = Column(DateTime)

@@ -106,6 +106,17 @@ DATABASE_URL=postgresql://user:password@localhost:5432/nanorem_mlm
 
 Не используйте `ALTER COLUMN` для SQLite: эта операция не выполняет rebuild. Не удаляйте и не объединяйте дубликаты для прохождения миграции. Если при добавлении unique index найдены дубли, `init_db()` остановится с именем таблицы/индекса и диагностическим `SELECT ... GROUP BY ... HAVING COUNT(*) > 1`; устранение конфликтов должно быть отдельным согласованным data-cleanup.
 
+### Read-only pre-deploy check существующей БД
+
+Перед применением schema migration запустите диагностику на backup/copy целевой базы. URL передаётся явно аргументом: скрипт не загружает `.env`, не вызывает `init_db()` и не применяет миграции. SQLite-подключение переводится в `query_only`; для PostgreSQL устанавливается read-only transaction. Для SQLite скрипт откажется создавать отсутствующий файл.
+
+```bash
+python pre_deploy_check.py --database-url "sqlite:///path/to/database-copy.db"
+python pre_deploy_check.py --database-url "$PREDEPLOY_DATABASE_URL"
+```
+
+Второй пример использует только переменную, которую оператор явно передал в команду; приложение и `.env` её автоматически не загружают. Не вставляйте production credentials в историю shell или общий терминал. Скрипт сообщает о duplicate email и других migration unique keys, orphan foreign keys, root count, подтверждённых отрицательных/неположительных финансовых значениях, а для SQLite — о legacy monetary/turnover `FLOAT` columns. Он выводит IDs и значения для ручного разбора, ограничивая примеры 100 строками на finding. Никакие найденные данные не исправляются. Exit code `0` означает отсутствие findings, `1` — нужен review/есть блокирующие findings, `2` — диагностика не смогла завершиться.
+
 ```bash
 # Создайте базу данных PostgreSQL
 createdb nanorem_mlm

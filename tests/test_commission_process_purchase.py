@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta
 from decimal import Decimal
 from unittest.mock import Mock
 from uuid import uuid4
@@ -20,29 +21,37 @@ def test_process_purchase_creates_five_commissions_and_is_idempotent():
     suffix = uuid4().hex[:8]
 
     try:
+        active_until = datetime.utcnow() + timedelta(days=365)
+
         root = Partner(
             first_name="Integration Root",
             username=f"integration_root_{suffix}",
+            subscription_end_date=active_until,
         )
         partner_a = Partner(
             first_name="Integration A",
             username=f"integration_a_{suffix}",
+            subscription_end_date=active_until,
         )
         partner_b = Partner(
             first_name="Integration B",
             username=f"integration_b_{suffix}",
+            subscription_end_date=active_until,
         )
         partner_c = Partner(
             first_name="Integration C",
             username=f"integration_c_{suffix}",
+            subscription_end_date=active_until,
         )
         partner_d = Partner(
             first_name="Integration D",
             username=f"integration_d_{suffix}",
+            subscription_end_date=active_until,
         )
         partner_e = Partner(
             first_name="Integration E",
             username=f"integration_e_{suffix}",
+            subscription_end_date=active_until,
         )
         buyer = Partner(
             first_name="Integration Buyer",

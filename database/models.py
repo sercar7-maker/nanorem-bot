@@ -1,12 +1,13 @@
 """Database Models for NANOREM MLM System using SQLAlchemy"""
 
-from datetime import datetime
+from datetime import datetime, timezone
 import enum
+import secrets
 import uuid
 
 from sqlalchemy import (
-    CheckConstraint, Column, Integer, String, Numeric, DateTime, ForeignKey,
-    Enum as SQLEnum, Text, Boolean, JSON, UniqueConstraint
+    CheckConstraint, Column, Index, Integer, String, Numeric, DateTime,
+    ForeignKey, Enum as SQLEnum, Text, Boolean, JSON, UniqueConstraint
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -14,6 +15,10 @@ from sqlalchemy.dialects.postgresql import UUID
 from core.security_tokens import create_telegram_binding_token
 
 from database.base import Base
+
+
+def create_referral_code() -> str:
+    return f"nr_{secrets.token_urlsafe(18)}"
 
 
 class PartnerRole(enum.Enum):
@@ -63,6 +68,12 @@ class Partner(Base):
         unique=True,
         default=create_telegram_binding_token
     )
+    referral_code = Column(
+        String(32),
+        unique=True,
+        nullable=False,
+        default=create_referral_code,
+    )
 
     first_name = Column(String)
     last_name = Column(String)
@@ -74,6 +85,13 @@ class Partner(Base):
     consent_date = Column(DateTime, nullable=True)
 
     upline_id = Column(Integer, ForeignKey("partners.id"), index=True)
+    root_id = Column(Integer, ForeignKey("partners.id"), index=True)
+    placement_version = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
 
     status = Column(
         SQLEnum(PartnerStatus),
@@ -83,6 +101,27 @@ class Partner(Base):
 
     registration_date = Column(DateTime, server_default=func.now())
     subscription_end_date = Column(DateTime, nullable=True)
+    annual_activity_until = Column(DateTime, nullable=True)
+
+    @property
+    def is_active(self) -> bool:
+        if self.status not in {
+            PartnerStatus.ACTIVE,
+            PartnerStatus.ACTIVE.name,
+            PartnerStatus.ACTIVE.value,
+        }:
+            return False
+
+        subscription_end = self.subscription_end_date
+        if subscription_end is None:
+            return False
+
+        if subscription_end.tzinfo is None:
+            subscription_end = subscription_end.replace(tzinfo=timezone.utc)
+        else:
+            subscription_end = subscription_end.astimezone(timezone.utc)
+
+        return subscription_end > datetime.now(timezone.utc)
 
     lineage = Column(JSON, default=list)
 
@@ -91,7 +130,12 @@ class Partner(Base):
     # 🔥 ДОБАВИЛИ РАНГ (если ещё нет)
     rank = Column(String, default="Silver")
 
-    upline = relationship("Partner", remote_side=[id], backref="downline")
+    upline = relationship(
+        "Partner",
+        remote_side=[id],
+        foreign_keys=[upline_id],
+        backref="downline",
+    )
 
     purchases = relationship("Purchase", back_populates="partner")
 
@@ -118,6 +162,13 @@ class Partner(Base):
     )
 
 
+Index(
+    "uq_partners_email_normalized",
+    func.lower(Partner.email),
+    unique=True,
+)
+
+
 class RootAllocationLock(Base):
     __tablename__ = "root_allocation_lock"
     __table_args__ = (
@@ -126,6 +177,66 @@ class RootAllocationLock(Base):
 
     id = Column(Integer, primary_key=True)
     lock_version = Column(Integer, nullable=False, default=0)
+
+
+class PartnerRecoveryEvent(Base):
+    __tablename__ = "partner_recovery_events"
+
+    id = Column(Integer, primary_key=True)
+    partner_id = Column(
+        Integer,
+        ForeignKey("partners.id"),
+        nullable=False,
+        index=True,
+    )
+    root_id = Column(Integer, ForeignKey("partners.id"), nullable=False)
+    old_upline_id = Column(Integer, ForeignKey("partners.id"))
+    old_parent_lineage = Column(JSON, nullable=False, default=list)
+    lost_activity_at = Column(DateTime, nullable=False)
+    recovery_until = Column(DateTime, nullable=False)
+    compressed_at = Column(DateTime, nullable=False)
+    compressed_partner_version = Column(Integer, nullable=False)
+    old_parent_version = Column(Integer, nullable=False)
+    status = Column(String(20), nullable=False, default="PENDING")
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
+    )
+
+
+Index(
+    "uq_partner_recovery_pending",
+    PartnerRecoveryEvent.partner_id,
+    unique=True,
+    sqlite_where=(PartnerRecoveryEvent.status == "PENDING"),
+    postgresql_where=(PartnerRecoveryEvent.status == "PENDING"),
+)
+
+
+class PartnerRecoveryChild(Base):
+    __tablename__ = "partner_recovery_children"
+    __table_args__ = (
+        UniqueConstraint(
+            "recovery_event_id",
+            "child_partner_id",
+            name="uq_partner_recovery_child",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    recovery_event_id = Column(
+        Integer,
+        ForeignKey("partner_recovery_events.id"),
+        nullable=False,
+        index=True,
+    )
+    child_partner_id = Column(
+        Integer,
+        ForeignKey("partners.id"),
+        nullable=False,
+    )
+    compressed_placement_version = Column(Integer, nullable=False)
 
 
 # =========================

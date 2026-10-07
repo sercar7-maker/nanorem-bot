@@ -2,10 +2,13 @@
 from database.models import Partner, Commission, Purchase
 from database.models_balance import Balance
 from database.models_stats import PartnerStats
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from collections import deque
 from datetime import datetime
 from services.root_allocation_lock import acquire_root_allocation_lock
+from services.structural_compression_service import (
+    StructuralCompressionService,
+)
 
 
 class PartnerService:
@@ -38,32 +41,36 @@ class PartnerService:
 
         try:
             acquire_root_allocation_lock(session)
+            if email:
+                email = email.strip().lower()
 
             root_count = session.query(Partner).filter(
-                Partner.upline_id.is_(None)
+                Partner.upline_id.is_(None),
+                or_(
+                    Partner.root_id.is_(None),
+                    Partner.root_id == Partner.id,
+                ),
             ).count()
-            if root_count > 2:
-                raise RuntimeError(
-                    "More than two root partners already exist"
+            if root_count != 2:
+                raise ValueError(
+                    "System is not ready for registration: exactly two "
+                    "Root partners must be created by an administrator"
                 )
 
-            if root_count < 2:
-                upline_id = None
-            elif not upline_id:
-                upline_id = self.choose_root(session)
+            if upline_id is None:
+                raise ValueError("A referral link is required")
 
             lineage = []
 
-            if upline_id:
-                upline = session.query(Partner).filter(
-                    Partner.id == upline_id
-                ).first()
+            upline = session.query(Partner).filter(
+                Partner.id == upline_id
+            ).first()
 
-                if not upline:
-                    raise ValueError("Реферальный партнёр не найден")
+            if not upline:
+                raise ValueError("Referral partner not found")
 
-                lineage = list(upline.lineage or [])
-                lineage.insert(0, upline.id)
+            lineage = list(upline.lineage or [])
+            lineage.insert(0, upline.id)
 
             partner = Partner(
                 telegram_id=telegram_id,
@@ -83,6 +90,10 @@ class PartnerService:
             )
 
             session.add(partner)
+            session.flush()
+            StructuralCompressionService(
+                session
+            ).ensure_root_affiliation(partner)
             session.flush()
 
             # рџ”Ґ РќРћР’РћР•: РћР±РЅРѕРІР»СЏРµРј team_size Сѓ РІСЃРµС… РїСЂРµРґРєРѕРІ
@@ -112,6 +123,53 @@ class PartnerService:
 
             return partner
 
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def create_root(
+        self,
+        *,
+        first_name: str | None = None,
+        last_name: str | None = None,
+        email: str | None = None,
+        phone: str | None = None,
+    ):
+        session = SessionLocal()
+
+        try:
+            acquire_root_allocation_lock(session)
+            root_count = session.query(Partner).filter(
+                Partner.upline_id.is_(None),
+                or_(
+                    Partner.root_id.is_(None),
+                    Partner.root_id == Partner.id,
+                ),
+            ).count()
+            if root_count >= 2:
+                raise ValueError("The system already has two Root partners")
+
+            partner = Partner(
+                first_name=first_name,
+                last_name=last_name,
+                email=email.strip().lower() if email else None,
+                phone=phone,
+                upline_id=None,
+                lineage=[],
+                subscription_end_date=None,
+                status="ACTIVE",
+                role="partner",
+                rank="Partner",
+            )
+            session.add(partner)
+            session.flush()
+            partner.root_id = partner.id
+            session.flush()
+            session.commit()
+            session.refresh(partner)
+            return partner
         except Exception:
             session.rollback()
             raise

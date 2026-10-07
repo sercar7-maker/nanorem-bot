@@ -4,21 +4,36 @@ Handles new orders from WooCommerce and calculates partner commissions.
 """
 
 import logging
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional, Dict, Any
 
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from database.db import SessionLocal
 from database.models import Partner, Purchase, OrderStatus
+from database.models_balance import (
+    BalanceOrderReservation,
+    BalanceOrderReservationStatus,
+)
 from web.api_client import NanorvsAPIClient
+from core.balance_service import BalanceService
 from core.commission import CommissionCalculator
 from services.distribution_service import DistributionService
 from services.stats_service import StatsService
 from services.rank_service import RankService
 from services.root_allocation_lock import acquire_root_allocation_lock
+from services.subscription_service import SubscriptionService
+from services.structural_compression_service import (
+    StructuralCompressionService,
+)
 
 logger = logging.getLogger(__name__)
+
+
+class RootPairNotReadyError(RuntimeError):
+    """Raised when WooCommerce processing requires unavailable Root partners."""
 
 
 class OrderProcessor:
@@ -59,12 +74,14 @@ class OrderProcessor:
 
         order_id = order_data.get("id")
         customer_id = order_data.get("customer_id")
+        status = order_data.get("status", "")
+
+        if status in {"cancelled", "failed"}:
+            return self._release_cancelled_purchase(order_id)
 
         total_amount = Decimal(
             str(order_data.get("total", "0"))
         )
-
-        status = order_data.get("status", "")
 
         logger.info(
             f"Заказ #{order_id}: "
@@ -100,6 +117,9 @@ class OrderProcessor:
         session = SessionLocal()
 
         try:
+            acquire_root_allocation_lock(session)
+            self._require_root_pair(session)
+
             # -------------------------------------------------
             # 1. Проверяем существующий заказ
             # -------------------------------------------------
@@ -139,6 +159,26 @@ class OrderProcessor:
                 session.rollback()
                 return False
 
+            reservation = (
+                session.query(BalanceOrderReservation)
+                .filter(
+                    BalanceOrderReservation.order_id == str(order_id)
+                )
+                .one_or_none()
+            )
+            if reservation:
+                if reservation.partner_id != partner.id:
+                    raise ValueError(
+                        "WooCommerce order balance reservation belongs "
+                        "to a different partner"
+                    )
+                if Decimal(str(reservation.order_total)) != total_amount:
+                    raise ValueError(
+                        "WooCommerce order total does not match its "
+                        "balance reservation"
+                    )
+                BalanceService(session).confirm_purchase(order_id)
+
             # -------------------------------------------------
             # 3. Создаём Purchase
             # -------------------------------------------------
@@ -149,12 +189,21 @@ class OrderProcessor:
                 amount=total_amount,
                 status=OrderStatus.PAID,
                 ext_ref=str(order_id),
+                paid_at=self._purchase_paid_at(order_data),
             )
 
             session.add(purchase)
 
             # flush получает purchase.id, но НЕ делает commit.
             session.flush()
+
+            compression_service = StructuralCompressionService(session)
+            compression_service.compress_if_due_before_purchase(
+                partner,
+                purchase.paid_at or datetime.now(timezone.utc),
+            )
+            SubscriptionService(session).apply_purchase(purchase)
+            compression_service.process_paid_purchase(partner, purchase)
 
             stats = StatsService(session).process_purchase(
                 partner_id=partner.id,
@@ -188,6 +237,10 @@ class OrderProcessor:
 
             return True
 
+        except RootPairNotReadyError:
+            session.rollback()
+            raise
+
         except Exception as e:
             logger.exception(
                 f"Ошибка при обработке заказа "
@@ -198,6 +251,69 @@ class OrderProcessor:
 
             return False
 
+        finally:
+            session.close()
+
+    @staticmethod
+    def _purchase_paid_at(order_data: Dict[str, Any]) -> datetime:
+        for field in ("date_paid_gmt", "date_paid"):
+            value = order_data.get(field)
+            if not value:
+                continue
+
+            try:
+                parsed = datetime.fromisoformat(
+                    str(value).replace("Z", "+00:00")
+                )
+            except ValueError:
+                logger.warning(
+                    "Ignoring invalid WooCommerce %s value",
+                    field,
+                )
+                continue
+
+            if parsed.tzinfo is None:
+                if field != "date_paid_gmt":
+                    continue
+                parsed = parsed.replace(tzinfo=timezone.utc)
+
+            return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+
+        return datetime.now(timezone.utc).replace(tzinfo=None)
+
+    def _release_cancelled_purchase(
+        self,
+        order_id: int | str | None,
+    ) -> bool:
+        if order_id is None:
+            logger.error("Cancelled WooCommerce order has no order id")
+            return False
+
+        session = SessionLocal()
+        try:
+            reservation = (
+                session.query(BalanceOrderReservation)
+                .filter(
+                    BalanceOrderReservation.order_id == str(order_id)
+                )
+                .one_or_none()
+            )
+            if reservation is None:
+                return True
+
+            if reservation.status == BalanceOrderReservationStatus.PENDING:
+                BalanceService(session).release_purchase(order_id)
+                session.commit()
+
+            return True
+        except Exception:
+            logger.exception(
+                "Failed to release balance reservation for "
+                "cancelled WooCommerce order #%s",
+                order_id,
+            )
+            session.rollback()
+            return False
         finally:
             session.close()
 
@@ -216,9 +332,10 @@ class OrderProcessor:
         Транзакцией управляет process_order_data().
         """
 
+        normalized_email = email.strip().lower()
         partner = (
             session.query(Partner)
-            .filter(Partner.email == email)
+            .filter(func.lower(Partner.email) == normalized_email)
             .first()
         )
 
@@ -228,8 +345,6 @@ class OrderProcessor:
                 f"{email}, ID={partner.id}"
             )
             return partner
-
-        acquire_root_allocation_lock(session)
 
         billing = order_data.get("billing", {})
 
@@ -276,7 +391,7 @@ class OrderProcessor:
             telegram_id=None,
             first_name=first_name,
             last_name=last_name,
-            email=email,
+            email=normalized_email,
             phone=phone,
             upline_id=upline_id,
             lineage=lineage,
@@ -289,6 +404,10 @@ class OrderProcessor:
 
         # Только flush.
         # Commit будет выполнен после успешной обработки комиссии.
+        session.flush()
+        StructuralCompressionService(
+            session
+        ).ensure_root_affiliation(new_partner)
         session.flush()
 
         logger.info(
@@ -309,10 +428,26 @@ class OrderProcessor:
         Используется единый DistributionService.
         """
 
+        self._require_root_pair(session)
         return (
             DistributionService()
             .get_upline_for_new_partner(session)
         )
+
+    @staticmethod
+    def _require_root_pair(session: Session) -> None:
+        root_count = session.query(Partner).filter(
+            Partner.upline_id.is_(None),
+            or_(
+                Partner.root_id.is_(None),
+                Partner.root_id == Partner.id,
+            ),
+        ).count()
+        if root_count != 2:
+            raise RootPairNotReadyError(
+                "System is not ready for registration: exactly two "
+                "Root partners must be created by an administrator"
+            )
 
     async def process_webhook(
         self,
