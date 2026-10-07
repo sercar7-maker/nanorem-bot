@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f7f5">
+    <title>Кабинет — NANOREM</title>
+    <link rel="stylesheet" href="/static/auth.css">
+    <script src="/static/auth.js" defer></script>
+</head>
+<body class="auth-page">
+    <main class="auth-shell dashboard-shell">
+        <header class="dashboard-header">
+            <a class="brand" href="/" aria-label="NANOREM — главная">
+                <img class="logo" src="/static/nanorem-logo.png" alt="">
+                <span>NANOREM</span>
+            </a>
+            <button id="logout-button" class="button secondary" type="button">Выйти</button>
+        </header>
+
+        <section class="auth-card dashboard-card" aria-labelledby="dashboard-title">
+            <div class="eyebrow">Ваш аккаунт</div>
+            <h1 id="dashboard-title">Личный кабинет</h1>
+            <p id="dashboard-message" class="form-message info" role="status" aria-live="polite">
+                Загружаем данные…
+            </p>
+            <div id="partner-details" class="details-list" hidden>
+                <div class="detail-row">
+                    <span>Партнёр</span>
+                    <strong id="partner-name"></strong>
+                </div>
+                <div class="detail-row">
+                    <span>Email</span>
+                    <strong id="partner-email"></strong>
+                </div>
+                <div class="detail-row">
+                    <span>Телефон</span>
+                    <strong id="partner-phone"></strong>
+                </div>
+                <div class="detail-row">
+                    <span>Реферальный код</span>
+                    <strong id="partner-referral-code"></strong>
+                </div>
+                <div class="detail-row">
+                    <span>Root ID</span>
+                    <strong id="partner-root-id"></strong>
+                </div>
+            </div>
+        </section>
+    </main>
+</body>
+</html>

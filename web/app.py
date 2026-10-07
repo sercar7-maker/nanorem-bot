@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request, Form, Header, HTTPException, status
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.exc import IntegrityError
 
@@ -24,6 +25,7 @@ from database.db import get_session, SessionLocal, init_db
 from database.models import Partner
 
 from web.api_client import NanorvsAPIClient
+from web.auth_api import router as auth_router
 from core.commission import CommissionCalculator
 from core.security_tokens import create_telegram_binding_token
 from services.notifications import NotificationService
@@ -38,9 +40,14 @@ logger = logging.getLogger(__name__)
 
 
 app = FastAPI()
-
+app.include_router(auth_router)
 
 BASE_DIR = Path(__file__).resolve().parent
+app.mount(
+    "/static",
+    StaticFiles(directory=str(BASE_DIR / "static")),
+    name="static",
+)
 
 templates = Jinja2Templates(
     directory=str(BASE_DIR / "templates")
@@ -85,6 +92,30 @@ order_processor = OrderProcessor(
 # ---------------------------------------------------------
 # Регистрация
 # ---------------------------------------------------------
+
+@app.get(
+    "/login",
+    response_class=HTMLResponse,
+)
+async def login_page(request: Request):
+    return templates.TemplateResponse(
+        request=request,
+        name="login.html",
+        context={"request": request},
+    )
+
+
+@app.get(
+    "/dashboard",
+    response_class=HTMLResponse,
+)
+async def dashboard_page(request: Request):
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard.html",
+        context={"request": request},
+    )
+
 
 @app.get(
     "/",

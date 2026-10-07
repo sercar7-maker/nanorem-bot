@@ -169,6 +169,88 @@ Index(
 )
 
 
+class AuthChallenge(Base):
+    __tablename__ = "auth_challenges"
+    __table_args__ = (
+        CheckConstraint(
+            "channel IN ('email', 'phone')",
+            name="ck_auth_challenges_channel",
+        ),
+        CheckConstraint(
+            "purpose IN "
+            "('login', 'recovery', 'change_email', 'change_phone')",
+            name="ck_auth_challenges_purpose",
+        ),
+        CheckConstraint(
+            "attempts >= 0 AND max_attempts > 0 "
+            "AND attempts <= max_attempts",
+            name="ck_auth_challenges_attempt_limits",
+        ),
+        Index("ix_auth_challenges_partner_id", "partner_id"),
+        Index("ix_auth_challenges_expires_at", "expires_at"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    partner_id = Column(Integer, ForeignKey("partners.id"), nullable=True)
+    channel = Column(String(10), nullable=False)
+    purpose = Column(String(20), nullable=False)
+    destination = Column(String(320), nullable=False)
+    code_hash = Column(String(128), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    max_attempts = Column(Integer, nullable=False, default=5, server_default="5")
+    used_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
+
+    @property
+    def is_valid(self) -> bool:
+        if self.used_at is not None or self.attempts >= self.max_attempts:
+            return False
+        expiry = self.expires_at
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+        else:
+            expiry = expiry.astimezone(timezone.utc)
+        return expiry > datetime.now(timezone.utc)
+
+
+class AuthSession(Base):
+    __tablename__ = "auth_sessions"
+    __table_args__ = (
+        Index("ix_auth_sessions_partner_id", "partner_id"),
+        Index("ix_auth_sessions_expires_at", "expires_at"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    partner_id = Column(Integer, ForeignKey("partners.id"), nullable=False)
+    token_hash = Column(String(128), nullable=False, unique=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    last_seen_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
+
+    @property
+    def is_active(self) -> bool:
+        if self.revoked_at is not None:
+            return False
+        expiry = self.expires_at
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+        else:
+            expiry = expiry.astimezone(timezone.utc)
+        return expiry > datetime.now(timezone.utc)
+
+
 class RootAllocationLock(Base):
     __tablename__ = "root_allocation_lock"
     __table_args__ = (

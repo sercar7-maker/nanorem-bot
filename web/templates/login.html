@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f7f5">
+    <title>Вход — NANOREM</title>
+    <link rel="stylesheet" href="/static/auth.css">
+    <script src="/static/auth.js" defer></script>
+</head>
+<body class="auth-page">
+    <main class="auth-shell">
+        <a class="brand" href="/" aria-label="NANOREM — главная">
+            <img class="logo" src="/static/nanorem-logo.png" alt="">
+            <span>NANOREM</span>
+        </a>
+
+        <section class="auth-card" aria-labelledby="login-title">
+            <div class="eyebrow">Личный кабинет</div>
+            <h1 id="login-title">Вход</h1>
+            <p class="intro">Войдите без пароля — отправим одноразовый код на ваш email или телефон.</p>
+
+            <form id="request-code-form" class="auth-form">
+                <label for="identifier">Email или телефон</label>
+                <input
+                    id="identifier"
+                    name="identifier"
+                    type="text"
+                    autocomplete="username"
+                    autocapitalize="none"
+                    inputmode="email"
+                    placeholder="name@example.com или +7…"
+                    maxlength="320"
+                    required
+                >
+                <p id="request-error" class="form-message error" role="alert" hidden></p>
+                <p id="request-info" class="form-message info" role="status" aria-live="polite" hidden></p>
+                <button id="request-button" class="button primary" type="submit">Получить код</button>
+            </form>
+
+            <form id="verify-code-form" class="auth-form" hidden>
+                <p class="delivery-note">Введите 6-значный код, отправленный на указанный канал.</p>
+                <label for="otp-code">Код подтверждения</label>
+                <input
+                    id="otp-code"
+                    name="code"
+                    class="otp-input"
+                    type="text"
+                    inputmode="numeric"
+                    autocomplete="one-time-code"
+                    pattern="[0-9]{6}"
+                    minlength="6"
+                    maxlength="6"
+                    placeholder="••••••"
+                    aria-describedby="otp-hint"
+                    required
+                >
+                <span id="otp-hint" class="field-hint">Введите все 6 цифр</span>
+                <p id="verify-error" class="form-message error" role="alert" hidden></p>
+                <button id="verify-button" class="button primary" type="submit">Войти</button>
+                <div class="resend-row">
+                    <span id="resend-timer" class="field-hint" role="status" aria-live="polite"></span>
+                    <button id="resend-button" class="text-button" type="button" disabled>
+                        Отправить код ещё раз
+                    </button>
+                </div>
+            </form>
+
+            <div class="support">
+                <button id="cant-login-button" class="text-button" type="button">Не могу войти</button>
+                <p id="recovery-note" class="field-hint" hidden>
+                    Для восстановления доступа запросите код на подтверждённый email или телефон.
+                    Если контакты недоступны, обратитесь в поддержку.
+                </p>
+            </div>
+        </section>
+        <p class="security-note">Одноразовый код действует ограниченное время. Никому его не сообщайте.</p>
+    </main>
+</body>
+</html>

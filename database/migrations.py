@@ -7,6 +7,8 @@ from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from database.models import (
+    AuthChallenge,
+    AuthSession,
     PartnerRecoveryChild,
     PartnerRecoveryEvent,
     RootAllocationLock,
@@ -585,6 +587,8 @@ def upgrade_schema(engine: Engine) -> None:
             connection,
             checkfirst=True,
         )
+        AuthChallenge.__table__.create(connection, checkfirst=True)
+        AuthSession.__table__.create(connection, checkfirst=True)
         _ensure_root_allocation_lock(connection)
         BalanceOrderReservation.__table__.create(
             connection,
