@@ -72,6 +72,19 @@ WC_API_BASE_URL: str = os.getenv(
 )
 
 # ====================================
+# SMTP CONFIGURATION
+# ====================================
+
+SMTP_ENABLED: bool = os.getenv("SMTP_ENABLED", "false").lower() == "true"
+SMTP_HOST: str = os.getenv("SMTP_HOST", "mail.nanorvs.ru")
+SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USERNAME: str | None = os.getenv("SMTP_USERNAME")
+SMTP_PASSWORD: str | None = os.getenv("SMTP_PASSWORD")
+SMTP_FROM_EMAIL: str | None = os.getenv("SMTP_FROM_EMAIL")
+SMTP_FROM_NAME: str = os.getenv("SMTP_FROM_NAME", "NANOREM")
+SMTP_TIMEOUT: int = int(os.getenv("SMTP_TIMEOUT", "15"))
+
+# ====================================
 # MLM CONFIGURATION
 # ====================================
 

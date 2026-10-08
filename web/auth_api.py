@@ -41,7 +41,34 @@ def get_auth_db():
 
 
 def get_auth_code_delivery() -> AuthCodeDelivery:
-    return DeferredAuthCodeDelivery()
+    from config import (
+        SMTP_ENABLED,
+        SMTP_FROM_EMAIL,
+        SMTP_PASSWORD,
+        SMTP_USERNAME,
+    )
+
+    if not SMTP_ENABLED:
+        return DeferredAuthCodeDelivery()
+
+    missing_settings = [
+        setting
+        for setting, value in (
+            ("SMTP_USERNAME", SMTP_USERNAME),
+            ("SMTP_PASSWORD", SMTP_PASSWORD),
+            ("SMTP_FROM_EMAIL", SMTP_FROM_EMAIL),
+        )
+        if not value
+    ]
+    if missing_settings:
+        missing = ", ".join(missing_settings)
+        raise RuntimeError(
+            f"SMTP is enabled but required configuration is missing: {missing}"
+        )
+
+    from services.smtp_delivery import SmtpAuthCodeDelivery
+
+    return SmtpAuthCodeDelivery()
 
 
 @router.post("/request-code", status_code=status.HTTP_202_ACCEPTED)
