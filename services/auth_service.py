@@ -18,6 +18,9 @@ logger = logging.getLogger(__name__)
 CHALLENGE_TTL = timedelta(minutes=10)
 AUTH_SESSION_TTL = timedelta(days=30)
 MAX_CHALLENGE_ATTEMPTS = 5
+AUTH_CODE_COOLDOWN = timedelta(seconds=60)
+AUTH_CODE_WINDOW = timedelta(minutes=15)
+AUTH_CODE_MAX_REQUESTS = 5
 
 
 class AuthCodeDelivery(Protocol):
@@ -154,6 +157,40 @@ class AuthService:
             return
 
         now = datetime.now(timezone.utc)
+        challenge_filter = (
+            AuthChallenge.partner_id == partner.id,
+            AuthChallenge.channel == channel,
+            AuthChallenge.destination == destination,
+        )
+        self.session.query(Partner).filter(
+            Partner.id == partner.id
+        ).with_for_update().one()
+        latest_challenge = (
+            self.session.query(AuthChallenge)
+            .filter(*challenge_filter)
+            .order_by(AuthChallenge.created_at.desc())
+            .first()
+        )
+        if latest_challenge is not None:
+            last_created_at = latest_challenge.created_at
+            if last_created_at.tzinfo is None:
+                last_created_at = last_created_at.replace(tzinfo=timezone.utc)
+            else:
+                last_created_at = last_created_at.astimezone(timezone.utc)
+            if now - last_created_at < AUTH_CODE_COOLDOWN:
+                return
+
+        recent_challenge_count = (
+            self.session.query(AuthChallenge)
+            .filter(
+                *challenge_filter,
+                AuthChallenge.created_at >= now - AUTH_CODE_WINDOW,
+            )
+            .count()
+        )
+        if recent_challenge_count >= AUTH_CODE_MAX_REQUESTS:
+            return
+
         previous_challenges = (
             self.session.query(AuthChallenge)
             .filter(
@@ -177,6 +214,7 @@ class AuthService:
             expires_at=now + CHALLENGE_TTL,
             attempts=0,
             max_attempts=MAX_CHALLENGE_ATTEMPTS,
+            created_at=now,
         )
         self.session.add(challenge)
         self.session.flush()

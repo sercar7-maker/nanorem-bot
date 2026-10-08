@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from database.models import AuthChallenge, AuthSession, Partner, PartnerStatus
+from services import auth_service
 from web import auth_api
 from web.app import app
 
@@ -99,6 +100,25 @@ def _verify_code(client, identifier: str, channel: str, code: str):
     )
 
 
+@pytest.fixture
+def auth_clock(monkeypatch):
+    class MutableDateTime(datetime):
+        current = datetime.now(timezone.utc)
+
+        @classmethod
+        def now(cls, tz=None):
+            if tz is None:
+                return cls.current.replace(tzinfo=None)
+            return cls.current.astimezone(tz)
+
+        @classmethod
+        def advance(cls, seconds: int) -> None:
+            cls.current += timedelta(seconds=seconds)
+
+    monkeypatch.setattr(auth_service, "datetime", MutableDateTime)
+    return MutableDateTime.advance
+
+
 def test_request_code_creates_email_challenge(auth_client, isolated_database):
     client, delivery = auth_client
     partner_id = _create_partner(
@@ -120,6 +140,113 @@ def test_request_code_creates_email_challenge(auth_client, isolated_database):
     assert challenge.purpose == "login"
     assert challenge.destination == "person@example.test"
     assert challenge.attempts == 0
+    session.close()
+
+
+def test_request_code_within_cooldown_does_not_create_challenge(
+    auth_client,
+    isolated_database,
+    auth_clock,
+):
+    client, delivery = auth_client
+    _create_partner(isolated_database, email="cooldown@example.test")
+
+    _request_code(client, "cooldown@example.test", "email")
+    auth_clock(59)
+    response = _request_code(client, "cooldown@example.test", "email")
+
+    assert response.status_code == 202
+    assert response.json() == auth_api.GENERIC_REQUEST_RESPONSE
+    assert len(delivery.deliveries) == 1
+    session = isolated_database()
+    assert session.query(AuthChallenge).count() == 1
+    session.close()
+
+
+def test_sequential_requests_with_existing_cooldown_create_one_challenge(
+    auth_client,
+    isolated_database,
+):
+    client, delivery = auth_client
+    _create_partner(isolated_database, email="serialized@example.test")
+
+    first_response = _request_code(client, "serialized@example.test", "email")
+    second_response = _request_code(client, "serialized@example.test", "email")
+
+    assert first_response.status_code == second_response.status_code == 202
+    assert first_response.json() == second_response.json() == (
+        auth_api.GENERIC_REQUEST_RESPONSE
+    )
+    assert len(delivery.deliveries) == 1
+    session = isolated_database()
+    assert session.query(AuthChallenge).count() == 1
+    session.close()
+
+
+def test_request_code_after_cooldown_is_allowed(
+    auth_client,
+    isolated_database,
+    auth_clock,
+):
+    client, delivery = auth_client
+    _create_partner(isolated_database, email="cooldown-expired@example.test")
+
+    _request_code(client, "cooldown-expired@example.test", "email")
+    auth_clock(60)
+    response = _request_code(
+        client,
+        "cooldown-expired@example.test",
+        "email",
+    )
+
+    assert response.status_code == 202
+    assert response.json() == auth_api.GENERIC_REQUEST_RESPONSE
+    assert len(delivery.deliveries) == 2
+    session = isolated_database()
+    assert session.query(AuthChallenge).count() == 2
+    session.close()
+
+
+def test_sixth_request_within_window_is_limited(
+    auth_client,
+    isolated_database,
+    auth_clock,
+):
+    client, delivery = auth_client
+    _create_partner(isolated_database, email="window-limit@example.test")
+
+    for _ in range(5):
+        _request_code(client, "window-limit@example.test", "email")
+        auth_clock(61)
+    response = _request_code(client, "window-limit@example.test", "email")
+
+    assert response.status_code == 202
+    assert response.json() == auth_api.GENERIC_REQUEST_RESPONSE
+    assert len(delivery.deliveries) == 5
+    session = isolated_database()
+    assert session.query(AuthChallenge).count() == 5
+    session.close()
+
+
+def test_request_allowed_after_old_challenge_leaves_window(
+    auth_client,
+    isolated_database,
+    auth_clock,
+):
+    client, delivery = auth_client
+    _create_partner(isolated_database, email="window-expired@example.test")
+
+    for _ in range(5):
+        _request_code(client, "window-expired@example.test", "email")
+        auth_clock(61)
+    auth_clock(15 * 60 + 1 - 5 * 61)
+    response = _request_code(client, "window-expired@example.test", "email")
+
+    assert response.status_code == 202
+    assert response.json() == auth_api.GENERIC_REQUEST_RESPONSE
+    assert len(delivery.deliveries) == 6
+    session = isolated_database()
+    assert session.query(AuthChallenge).count() == 6
     session.close()
 
 
@@ -326,11 +453,13 @@ def test_challenge_cannot_be_reused(auth_client, isolated_database):
 def test_new_challenge_invalidates_previous_active_challenge(
     auth_client,
     isolated_database,
+    auth_clock,
 ):
     client, delivery = auth_client
     _create_partner(isolated_database, email="replace@example.test")
     _request_code(client, "replace@example.test", "email")
     previous_code = delivery.deliveries[0]["code"]
+    auth_clock(60)
     _request_code(client, "replace@example.test", "email")
     current_code = delivery.deliveries[1]["code"]
 
