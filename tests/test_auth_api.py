@@ -123,6 +123,45 @@ def test_request_code_creates_email_challenge(auth_client, isolated_database):
     session.close()
 
 
+def test_delivery_failure_invalidates_challenge_without_exposing_error(
+    auth_client,
+    isolated_database,
+):
+    client, _ = auth_client
+    _create_partner(isolated_database, email="delivery-failure@example.test")
+
+    class FailingAuthCodeDelivery(FakeAuthCodeDelivery):
+        def send_code(
+            self,
+            *,
+            channel: str,
+            destination: str,
+            code: str,
+        ) -> None:
+            raise RuntimeError("sensitive delivery failure")
+
+    app.dependency_overrides[auth_api.get_auth_code_delivery] = (
+        FailingAuthCodeDelivery
+    )
+
+    response = _request_code(
+        client,
+        "delivery-failure@example.test",
+        "email",
+    )
+
+    assert response.status_code == 202
+    assert response.json() == auth_api.GENERIC_REQUEST_RESPONSE
+    assert "sensitive delivery failure" not in response.text
+
+    session = isolated_database()
+    challenge = session.query(AuthChallenge).one()
+    assert challenge.used_at is not None
+    assert challenge.is_valid is False
+    assert session.query(AuthSession).count() == 0
+    session.close()
+
+
 def test_request_code_creates_phone_challenge(auth_client, isolated_database):
     client, delivery = auth_client
     partner_id = _create_partner(

@@ -190,6 +190,8 @@ class AuthService:
                 code=code,
             )
         except Exception:
+            challenge.used_at = now
+            self.session.commit()
             logger.warning("Authentication code delivery failed")
 
     def verify_code(
