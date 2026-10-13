@@ -58,7 +58,7 @@ class PartnerService:
                 )
 
             if upline_id is None:
-                raise ValueError("A referral link is required")
+                upline_id = self.choose_root(session)
 
             lineage = []
 

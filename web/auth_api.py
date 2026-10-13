@@ -1,3 +1,7 @@
+
+import ipaddress
+import os
+from threading import Lock
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -5,13 +9,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from database.db import SessionLocal
-from database.models import Partner
 from services.auth_service import (
     AUTH_SESSION_TTL,
     AuthCodeDelivery,
     AuthService,
     DeferredAuthCodeDelivery,
     InvalidAuthCodeError,
+    normalize_identifier,
 )
 
 
@@ -21,6 +25,11 @@ SESSION_COOKIE_PATH = "/"
 GENERIC_REQUEST_RESPONSE = {
     "message": "If the account exists, a code has been sent."
 }
+
+LOCAL_API_ONLY = os.getenv("LOCAL_API_ONLY", "").strip().lower() == "true"
+
+_local_auth_codes: dict[tuple[str, str], str] = {}
+_local_auth_codes_lock = Lock()
 
 
 class RequestCodeBody(BaseModel):
@@ -32,6 +41,38 @@ class VerifyCodeBody(RequestCodeBody):
     code: str = Field(pattern=r"^[0-9]{6}$")
 
 
+class LocalAuthCodeDelivery:
+    """In-memory OTP delivery adapter for explicit local testing only."""
+
+    def send_code(
+        self,
+        *,
+        channel: str,
+        destination: str,
+        code: str,
+    ) -> None:
+        with _local_auth_codes_lock:
+            _local_auth_codes[(channel, destination)] = code
+
+
+def _is_loopback_request(request: Request) -> bool:
+    if request.client is None:
+        return False
+
+    try:
+        return ipaddress.ip_address(request.client.host).is_loopback
+    except ValueError:
+        return False
+
+
+def _require_local_code_access(request: Request) -> None:
+    if not LOCAL_API_ONLY or not _is_loopback_request(request):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Not found",
+        )
+
+
 def get_auth_db():
     session = SessionLocal()
     try:
@@ -41,6 +82,9 @@ def get_auth_db():
 
 
 def get_auth_code_delivery() -> AuthCodeDelivery:
+    if LOCAL_API_ONLY:
+        return LocalAuthCodeDelivery()
+
     from config import (
         SMTP_ENABLED,
         SMTP_FROM_EMAIL,
@@ -87,7 +131,43 @@ def request_code(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
+
     return GENERIC_REQUEST_RESPONSE
+
+
+@router.get("/local-code")
+def get_local_auth_code(
+    request: Request,
+    identifier: str,
+    channel: Literal["email", "phone"] = "phone",
+):
+    _require_local_code_access(request)
+
+    if not identifier.strip() or len(identifier) > 320:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid identifier",
+        )
+
+    try:
+        destination = normalize_identifier(identifier, channel)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    key = (channel, destination)
+    with _local_auth_codes_lock:
+        code = _local_auth_codes.pop(key, None)
+
+    if code is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No local code available",
+        )
+
+    return {"code": code}
 
 
 @router.post("/verify-code")
@@ -119,7 +199,7 @@ def verify_code(
         value=token,
         max_age=int(AUTH_SESSION_TTL.total_seconds()),
         httponly=True,
-        secure=True,
+        secure=not LOCAL_API_ONLY,
         samesite="strict",
         path=SESSION_COOKIE_PATH,
     )
@@ -133,11 +213,12 @@ def logout(
 ):
     token = request.cookies.get(SESSION_COOKIE_NAME)
     AuthService(session, DeferredAuthCodeDelivery()).logout(token)
+
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     response.delete_cookie(
         key=SESSION_COOKIE_NAME,
         path=SESSION_COOKIE_PATH,
-        secure=True,
+        secure=not LOCAL_API_ONLY,
         httponly=True,
         samesite="strict",
     )
@@ -154,6 +235,7 @@ def get_current_partner(
         session,
         DeferredAuthCodeDelivery(),
     ).authenticate_session(token)
+
     if authenticated is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

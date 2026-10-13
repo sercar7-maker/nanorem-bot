@@ -86,11 +86,11 @@ def test_regular_registration_requires_existing_roots_and_referral(
         session.close()
 
     root_ids = seed_root_pair(isolated_database)
-    with pytest.raises(ValueError, match="referral link is required"):
-        service.create_partner(
-            telegram_id=None,
-            first_name="Missing referral",
-        )
+    balanced_partner = service.create_partner(
+        telegram_id=None,
+        first_name="Missing referral",
+    )
+    assert balanced_partner.upline_id in root_ids
 
     partner_id = create_partner(
         name="Referred partner",
@@ -168,24 +168,21 @@ def test_public_registration_without_ref_does_not_create_root(
         isolated_database,
     )
 
-    with pytest.raises(HTTPException) as error:
-        asyncio.run(
-            public_app.register_user(
-                _registration_request(),
-                first_name="Public",
-                last_name="Registrant",
-                email="public-no-ref@example.test",
-                phone="",
-                ref=None,
-                consent="on",
-            )
+    asyncio.run(
+        public_app.register_user(
+            _registration_request(),
+            first_name="Public",
+            last_name="Registrant",
+            email="public-no-ref@example.test",
+            phone="",
+            ref=None,
+            consent="on",
         )
+    )
 
-    assert error.value.status_code == 400
-    assert "referral link is required" in error.value.detail
     session = isolated_database()
     try:
-        assert session.query(Partner).count() == 2
+        assert session.query(Partner).count() == 3
         assert session.query(Partner).filter(
             Partner.upline_id.is_(None)
         ).count() == 2

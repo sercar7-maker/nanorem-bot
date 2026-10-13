@@ -18,11 +18,8 @@ class DistributionService:
             .all()
         )
 
-        if len(roots) < 2:
-            raise ValueError("Нужно минимум 2 root-партнёра")
-
-        # Берём первые два root-партнёра.
-        roots = roots[:2]
+        if len(roots) != 2:
+            raise ValueError("Нужно ровно 2 root-партнёра")
 
         root_ids = {root.id: 0 for root in roots}
 

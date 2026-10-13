@@ -2,6 +2,8 @@ import base64
 import hashlib
 import hmac
 import logging
+import os
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -39,10 +41,60 @@ from scheduler import start_scheduler, stop_scheduler
 logger = logging.getLogger(__name__)
 
 
+def _safe_integrity_error_summary(exc: IntegrityError) -> str:
+    """Return only a recognized constraint/column description, never row values."""
+    original = getattr(exc, "orig", None)
+    message = str(original).splitlines()[0].strip() if original else ""
+
+    patterns = (
+        r"UNIQUE constraint failed: [A-Za-z0-9_., ]+",
+        r"NOT NULL constraint failed: [A-Za-z0-9_.]+",
+        r"FOREIGN KEY constraint failed",
+        r"CHECK constraint failed(?:: [A-Za-z0-9_ ]+)?",
+        r'duplicate key value violates unique constraint "[A-Za-z0-9_]+"',
+        r'null value in column "[A-Za-z0-9_]+" violates not-null constraint',
+        r'violates foreign key constraint "[A-Za-z0-9_]+"',
+        r'violates check constraint "[A-Za-z0-9_]+"',
+    )
+
+    for pattern in patterns:
+        if re.fullmatch(pattern, message, flags=re.IGNORECASE):
+            return message
+
+    # Unknown database formats/messages are deliberately not exposed to logs.
+    error_type = type(original).__name__ if original else "unknown"
+    return f"unrecognized database constraint error ({error_type})"
+
+
+def _env_flag(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+# Explicit opt-in for local API checks: no Telegram client, no webhook
+# management and no scheduler. Disabled by default.
+LOCAL_API_ONLY = _env_flag("LOCAL_API_ONLY")
+
+
+class _LocalApiOnlyBot:
+    """Stand-in for telegram.Bot in LOCAL_API_ONLY mode; never calls Telegram."""
+
+    async def send_message(self, chat_id, text, **kwargs):
+        logger.info(
+            "LOCAL_API_ONLY: Telegram message suppressed"
+        )
+        return None
+
+
 app = FastAPI()
 app.include_router(auth_router)
 
 BASE_DIR = Path(__file__).resolve().parent
+
 app.mount(
     "/static",
     StaticFiles(directory=str(BASE_DIR / "static")),
@@ -58,14 +110,17 @@ templates = Jinja2Templates(
 # Telegram
 # ---------------------------------------------------------
 
-telegram_app = (
-    Application
-    .builder()
-    .token(BOT_TOKEN)
-    .build()
-)
+if LOCAL_API_ONLY:
+    telegram_app = None
+else:
+    telegram_app = (
+        Application
+        .builder()
+        .token(BOT_TOKEN)
+        .build()
+    )
 
-setup_handlers(telegram_app)
+    setup_handlers(telegram_app)
 
 
 # ---------------------------------------------------------
@@ -74,9 +129,12 @@ setup_handlers(telegram_app)
 
 api_client = NanorvsAPIClient()
 
-web_bot = Bot(
-    token=BOT_TOKEN
-)
+if LOCAL_API_ONLY:
+    web_bot = _LocalApiOnlyBot()
+else:
+    web_bot = Bot(
+        token=BOT_TOKEN
+    )
 
 notification_service = NotificationService(
     web_bot
@@ -121,9 +179,7 @@ async def dashboard_page(request: Request):
     "/",
     response_class=HTMLResponse,
 )
-async def home(
-    request: Request,
-):
+async def home(request: Request):
     return templates.TemplateResponse(
         request=request,
         name="register.html",
@@ -171,6 +227,33 @@ async def register_user(
             detail="Consent is required",
         )
 
+    # Нормализация реферального кода из ссылки.
+    if ref and ref.strip():
+        from urllib.parse import parse_qs, urlparse
+
+        raw_ref = ref.strip()
+
+        if "://" in raw_ref:
+            parsed_ref = urlparse(raw_ref)
+            link_ref = parse_qs(parsed_ref.query).get(
+                "ref",
+                [None],
+            )[0]
+
+            if link_ref:
+                raw_ref = link_ref.strip()
+
+        elif raw_ref.startswith("ref="):
+            link_ref = parse_qs(raw_ref).get(
+                "ref",
+                [None],
+            )[0]
+
+            if link_ref:
+                raw_ref = link_ref.strip()
+
+        ref = raw_ref
+
     binding_token = create_telegram_binding_token()
     upline_id = None
 
@@ -179,6 +262,7 @@ async def register_user(
             upline_id = session.query(Partner.id).filter(
                 Partner.referral_code == ref.strip()
             ).scalar()
+
             if upline_id is None:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -202,12 +286,19 @@ async def register_user(
             consent_version="v.1.0 21.04.2026",
             consent_date=datetime.utcnow(),
         )
+
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
+
     except IntegrityError as exc:
+        logger.error(
+            "REGISTER IntegrityError: %s",
+            _safe_integrity_error_summary(exc),
+        )
+
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Unable to create partner",
@@ -218,6 +309,7 @@ async def register_user(
             upline = session.query(Partner).filter(
                 Partner.id == upline_id
             ).first()
+
             upline_telegram_id = (
                 upline.telegram_id if upline else None
             )
@@ -234,8 +326,11 @@ async def register_user(
                         partner_name=full_name,
                     )
                 )
+
             except Exception:
-                logger.exception("Failed to schedule referral notification")
+                logger.exception(
+                    "Failed to schedule referral notification"
+                )
 
     return HTMLResponse(
         f"""
@@ -317,9 +412,7 @@ def verify_woocommerce_signature(
         return False
 
     digest = hmac.new(
-        WOOCOMMERCE_WEBHOOK_SECRET.encode(
-            "utf-8"
-        ),
+        WOOCOMMERCE_WEBHOOK_SECRET.encode("utf-8"),
         body,
         hashlib.sha256,
     ).digest()
@@ -349,9 +442,7 @@ async def webhook_endpoint(
     """
     Основной WooCommerce webhook.
 
-    Важно:
-    сначала читаем raw body,
-    проверяем подпись,
+    Сначала читаем raw body, проверяем подпись,
     только потом разбираем JSON.
     """
 
@@ -363,8 +454,7 @@ async def webhook_endpoint(
             x_wc_webhook_signature,
         ):
             logger.warning(
-                "Rejected WooCommerce webhook: "
-                "invalid signature"
+                "Rejected WooCommerce webhook: invalid signature"
             )
 
             raise HTTPException(
@@ -380,18 +470,14 @@ async def webhook_endpoint(
             f"status={payload.get('status')}"
         )
 
-        success = (
-            await order_processor.process_webhook(
-                payload
-            )
+        success = await order_processor.process_webhook(
+            payload
         )
 
         if success:
             return {
                 "success": True,
-                "message": (
-                    "Order processed successfully"
-                ),
+                "message": "Order processed successfully",
             }
 
         logger.error(
@@ -412,15 +498,15 @@ async def webhook_endpoint(
             detail=str(exc),
         ) from exc
 
-    except Exception as e:
+    except Exception as exc:
         logger.exception(
-            f"Error processing webhook: {e}"
+            "Error processing webhook"
         )
 
         raise HTTPException(
             status_code=500,
             detail="Webhook processing failed",
-        ) from e
+        ) from exc
 
 
 # ---------------------------------------------------------
@@ -437,7 +523,6 @@ async def telegram_webhook(
 ):
     """
     Webhook Telegram Bot API.
-
     Проверяем секретный заголовок Telegram.
     """
 
@@ -462,8 +547,7 @@ async def telegram_webhook(
         TELEGRAM_WEBHOOK_SECRET,
     ):
         logger.warning(
-            "Rejected Telegram webhook: "
-            "invalid secret"
+            "Rejected Telegram webhook: invalid secret"
         )
 
         raise HTTPException(
@@ -479,17 +563,15 @@ async def telegram_webhook(
             telegram_app.bot,
         )
 
-        await telegram_app.process_update(
-            update
-        )
+        await telegram_app.process_update(update)
 
         return {
             "status": "ok"
         }
 
-    except Exception as e:
+    except Exception:
         logger.exception(
-            f"Telegram webhook error: {e}"
+            "Telegram webhook error"
         )
 
         return {
@@ -508,7 +590,15 @@ async def on_startup():
     Инициализация Telegram и установка webhook.
     """
 
+    if LOCAL_API_ONLY:
+        logger.warning(
+            "LOCAL_API_ONLY enabled: database initialization, Telegram "
+            "initialization, webhook management and scheduler are skipped"
+        )
+        return
+
     init_db()
+
     await telegram_app.initialize()
 
     if WEBHOOK_URL:
@@ -517,21 +607,20 @@ async def on_startup():
                 "TELEGRAM_WEBHOOK_SECRET is required when WEBHOOK_URL is set"
             )
 
-        webhook_url = (
-            f"{WEBHOOK_URL}/telegram-webhook"
-        )
+        webhook_url = f"{WEBHOOK_URL}/telegram-webhook"
 
         await telegram_app.bot.set_webhook(
             url=webhook_url,
             secret_token=TELEGRAM_WEBHOOK_SECRET,
         )
 
-        logger.info("Telegram webhook configured")
+        logger.info(
+            "Telegram webhook configured"
+        )
 
     else:
         logger.warning(
-            "WEBHOOK_URL not set, "
-            "Telegram webhook not configured"
+            "WEBHOOK_URL not set, Telegram webhook not configured"
         )
 
     start_scheduler()
@@ -546,6 +635,9 @@ async def on_shutdown():
     """
     Корректное завершение Telegram.
     """
+
+    if LOCAL_API_ONLY:
+        return
 
     await telegram_app.bot.delete_webhook()
 

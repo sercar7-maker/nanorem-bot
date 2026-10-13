@@ -104,6 +104,14 @@ class Partner(Base):
     annual_activity_until = Column(DateTime, nullable=True)
 
     @property
+    def is_permanent_root(self) -> bool:
+        return (
+            self.id is not None
+            and self.root_id == self.id
+            and self.upline_id is None
+        )
+
+    @property
     def is_active(self) -> bool:
         if self.status not in {
             PartnerStatus.ACTIVE,
@@ -111,6 +119,11 @@ class Partner(Base):
             PartnerStatus.ACTIVE.value,
         }:
             return False
+
+        # Permanent Root partners are not deactivated by a missing or
+        # expired subscription; only regular partners need one.
+        if self.is_permanent_root:
+            return True
 
         subscription_end = self.subscription_end_date
         if subscription_end is None:

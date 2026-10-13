@@ -88,26 +88,28 @@
         <!-- Поля пользователя -->
         <div class="form-group">
             <label for="first_name">Имя *</label>
-            <input type="text" id="first_name" name="first_name" required placeholder="Сергей">
+            <input type="text" id="first_name" name="first_name" required placeholder="&#1048;&#1074;&#1072;&#1085;">
         </div>
 
         <div class="form-group">
             <label for="last_name">Фамилия *</label>
-            <input type="text" id="last_name" name="last_name" required placeholder="Царик">
+            <input type="text" id="last_name" name="last_name" required placeholder="&#1048;&#1074;&#1072;&#1085;&#1086;&#1074;">
         </div>
 
         <div class="form-group">
             <label for="email">Email *</label>
-            <input type="email" id="email" name="email" required placeholder="sercar7@gmail.com">
+            <input type="email" id="email" name="email" required placeholder="example@example.com">
         </div>
 
         <div class="form-group">
             <label for="phone">Телефон *</label>
-            <input type="tel" id="phone" name="phone" required placeholder="+79275148553">
+            <input type="tel" id="phone" name="phone" required placeholder="+7 900 000-00-00">
         </div>
 
         <!-- Скрытое поле для реферала -->
-        <input type="hidden" name="ref" value="{{ ref }}">
+        <label for="ref">&#1056;&#1077;&#1092;&#1077;&#1088;&#1072;&#1083;&#1100;&#1085;&#1072;&#1103; &#1089;&#1089;&#1099;&#1083;&#1082;&#1072; &#1080;&#1083;&#1080; &#1082;&#1086;&#1076; (&#1085;&#1077;&#1086;&#1073;&#1103;&#1079;&#1072;&#1090;&#1077;&#1083;&#1100;&#1085;&#1086;)</label>
+        <input type="text" id="ref" name="ref" value="{{ ref or '' }}"
+               placeholder="&#1042;&#1089;&#1090;&#1072;&#1074;&#1100;&#1090;&#1077; &#1089;&#1089;&#1099;&#1083;&#1082;&#1091; &#1080;&#1083;&#1080; &#1082;&#1086;&#1076; &#1087;&#1088;&#1080;&#1075;&#1083;&#1072;&#1096;&#1077;&#1085;&#1085;&#1086;&#1075;&#1086;">
 
         <!-- Согласие на обработку ПД (полный текст) -->
         <h3>Согласие на обработку персональных данных</h3>

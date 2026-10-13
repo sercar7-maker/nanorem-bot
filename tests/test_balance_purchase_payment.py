@@ -335,6 +335,7 @@ def test_order_webhook_confirms_once_and_commission_uses_full_order_total(
         Decimal("5000.00"),
     )
     buyer_id = buyer.id
+    ancestor_id = ancestor.id
     reservation_id = reservation.id
     session.commit()
     session.close()
@@ -358,9 +359,9 @@ def test_order_webhook_confirms_once_and_commission_uses_full_order_total(
 
     session = isolated_database()
     purchase = session.query(Purchase).filter_by(ext_ref="702").one()
-    commission = session.query(Commission).filter_by(
+    commissions = session.query(Commission).filter_by(
         purchase_id=purchase.id
-    ).one()
+    ).order_by(Commission.level).all()
     reservation = session.get(BalanceOrderReservation, reservation_id)
     buyer_balance = session.get(Balance, buyer_id)
     payment_transactions = session.query(BalanceTransaction).filter_by(
@@ -369,8 +370,15 @@ def test_order_webhook_confirms_once_and_commission_uses_full_order_total(
     ).all()
 
     assert purchase.amount == Decimal("5000.00")
-    assert commission.base_amount == Decimal("5000.00")
-    assert commission.amount == Decimal("1000.00")
+    # Level 1: the active sponsor; level 2: the permanent Root, which is
+    # always active and receives the regular level-2 rate.
+    assert [
+        (c.partner_id, c.level, c.base_amount, c.amount)
+        for c in commissions
+    ] == [
+        (ancestor_id, 1, Decimal("5000.00"), Decimal("1000.00")),
+        (root_ids[0], 2, Decimal("5000.00"), Decimal("500.00")),
+    ]
     assert reservation.status == BalanceOrderReservationStatus.CONFIRMED
     assert Decimal(str(buyer_balance.amount)) == Decimal("0.00")
     assert Decimal(str(buyer_balance.hold)) == Decimal("0.00")
