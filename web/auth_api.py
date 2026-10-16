@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from database.db import SessionLocal
+from database.models import Partner
 from services.auth_service import (
     AUTH_SESSION_TTL,
     AuthCodeDelivery,
@@ -79,6 +80,36 @@ def get_auth_db():
         yield session
     finally:
         session.close()
+
+
+def require_authenticated_partner(
+    request: Request,
+    session: Session = Depends(get_auth_db),
+) -> Partner:
+    """Return the partner bound to the current session cookie."""
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    authenticated = AuthService(
+        session,
+        DeferredAuthCodeDelivery(),
+    ).authenticate_session(token)
+    if authenticated is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+        )
+    return authenticated[1]
+
+
+def require_admin_partner(
+    partner: Partner = Depends(require_authenticated_partner),
+) -> Partner:
+    """Allow only a partner whose stored role is admin."""
+    if partner.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+    return partner
 
 
 def get_auth_code_delivery() -> AuthCodeDelivery:
@@ -227,22 +258,8 @@ def logout(
 
 @router.get("/me")
 def get_current_partner(
-    request: Request,
-    session: Session = Depends(get_auth_db),
+    partner: Partner = Depends(require_authenticated_partner),
 ):
-    token = request.cookies.get(SESSION_COOKIE_NAME)
-    authenticated = AuthService(
-        session,
-        DeferredAuthCodeDelivery(),
-    ).authenticate_session(token)
-
-    if authenticated is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required",
-        )
-
-    _, partner = authenticated
     return {
         "id": partner.id,
         "email": partner.email,
@@ -255,4 +272,5 @@ def get_current_partner(
             if hasattr(partner.status, "value")
             else partner.status
         ),
+        "role": partner.role,
     }

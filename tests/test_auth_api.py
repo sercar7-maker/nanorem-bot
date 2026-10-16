@@ -508,9 +508,18 @@ def test_me_returns_only_authenticated_partner_fields(
         "referral_code",
         "root_id",
         "status",
+        "role",
     }
     assert response.json()["id"] == partner_id
     assert response.json()["email"] == "me@example.test"
+    assert response.json()["role"] == "partner"
+
+    stored = isolated_database()
+    stored.get(Partner, partner_id).role = "admin"
+    stored.commit()
+    stored.close()
+
+    assert client.get("/auth/me").json()["role"] == "admin"
 
 
 def test_logout_revokes_current_session(auth_client, isolated_database):
@@ -536,6 +545,150 @@ def test_logout_revokes_current_session(auth_client, isolated_database):
     assert auth_session.partner_id == partner_id
     assert auth_session.revoked_at is not None
     session.close()
+
+
+def _store_session(
+    session_factory,
+    partner_id: int,
+    *,
+    expired: bool = False,
+    revoked: bool = False,
+) -> str:
+    token = f"probe-token-{partner_id}-{expired}-{revoked}"
+    now = datetime.now(timezone.utc)
+    session = session_factory()
+    session.add(
+        AuthSession(
+            partner_id=partner_id,
+            token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(),
+            expires_at=(
+                now - timedelta(minutes=1)
+                if expired
+                else now + timedelta(days=1)
+            ),
+            revoked_at=now if revoked else None,
+        )
+    )
+    session.commit()
+    session.close()
+    return token
+
+
+@pytest.fixture
+def admin_probe_client(isolated_database, monkeypatch):
+    from fastapi import Depends, FastAPI
+
+    monkeypatch.setattr(auth_api, "SessionLocal", isolated_database)
+    probe = FastAPI()
+
+    @probe.get("/admin-check")
+    def admin_check(
+        partner: Partner = Depends(auth_api.require_admin_partner),
+    ):
+        return {"id": partner.id, "role": partner.role}
+
+    client = TestClient(probe)
+    try:
+        yield client
+    finally:
+        client.close()
+
+
+def test_admin_check_without_session_is_rejected(admin_probe_client):
+    response = admin_probe_client.get("/admin-check")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Authentication required"
+
+
+@pytest.mark.parametrize(
+    ("expired", "revoked", "cookie"),
+    [
+        (False, False, "not-a-valid-session"),
+        (True, False, None),
+        (False, True, None),
+    ],
+)
+def test_admin_check_rejects_unusable_session(
+    admin_probe_client,
+    isolated_database,
+    expired,
+    revoked,
+    cookie,
+):
+    partner_id = _create_partner(
+        isolated_database,
+        email=f"unusable-{expired}-{revoked}@example.test",
+    )
+    if cookie is None:
+        cookie = _store_session(
+            isolated_database,
+            partner_id,
+            expired=expired,
+            revoked=revoked,
+        )
+    admin_probe_client.cookies.set(auth_api.SESSION_COOKIE_NAME, cookie)
+
+    response = admin_probe_client.get("/admin-check")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Authentication required"
+
+
+def test_admin_check_rejects_regular_partner(
+    admin_probe_client,
+    isolated_database,
+):
+    partner_id = _create_partner(
+        isolated_database,
+        email="regular-admin-check@example.test",
+    )
+    token = _store_session(isolated_database, partner_id)
+    admin_probe_client.cookies.set(auth_api.SESSION_COOKIE_NAME, token)
+
+    response = admin_probe_client.get("/admin-check")
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Admin access required"
+
+
+def test_admin_check_rejects_root_without_admin_role(
+    admin_probe_client,
+    isolated_database,
+):
+    partner_id = _create_partner(
+        isolated_database,
+        email="root-not-admin@example.test",
+        root=True,
+    )
+    token = _store_session(isolated_database, partner_id)
+    admin_probe_client.cookies.set(auth_api.SESSION_COOKIE_NAME, token)
+
+    response = admin_probe_client.get("/admin-check")
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Admin access required"
+
+
+def test_admin_check_allows_stored_admin_role(
+    admin_probe_client,
+    isolated_database,
+):
+    partner_id = _create_partner(
+        isolated_database,
+        email="stored-admin@example.test",
+    )
+    session = isolated_database()
+    session.get(Partner, partner_id).role = "admin"
+    session.commit()
+    session.close()
+    token = _store_session(isolated_database, partner_id)
+    admin_probe_client.cookies.set(auth_api.SESSION_COOKIE_NAME, token)
+
+    response = admin_probe_client.get("/admin-check")
+
+    assert response.status_code == 200
+    assert response.json() == {"id": partner_id, "role": "admin"}
 
 
 def test_repeated_logout_is_safe(auth_client):

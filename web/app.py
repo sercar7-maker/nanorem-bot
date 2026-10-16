@@ -27,6 +27,7 @@ from database.db import get_session, SessionLocal, init_db
 from database.models import Partner
 
 from web.api_client import NanorvsAPIClient
+from web.admin_api import router as admin_router
 from web.auth_api import router as auth_router
 from core.commission import CommissionCalculator
 from core.security_tokens import create_telegram_binding_token
@@ -92,6 +93,7 @@ class _LocalApiOnlyBot:
 
 app = FastAPI()
 app.include_router(auth_router)
+app.include_router(admin_router)
 
 BASE_DIR = Path(__file__).resolve().parent
 

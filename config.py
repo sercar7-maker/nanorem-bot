@@ -1,5 +1,6 @@
 ﻿import os
 import logging
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -87,6 +88,51 @@ SMTP_TIMEOUT: int = int(os.getenv("SMTP_TIMEOUT", "15"))
 # ====================================
 # MLM CONFIGURATION
 # ====================================
+
+def parse_purchase_amount(setting_name: str, raw: str) -> Decimal:
+    """Parse a ruble threshold: finite, positive, no fraction of a kopeck."""
+    try:
+        amount = Decimal(raw.strip())
+    except (InvalidOperation, AttributeError):
+        raise RuntimeError(
+            f"{setting_name}: нужно конечное положительное число рублей "
+            f"без долей копейки, получено {raw!r}"
+        ) from None
+    if not amount.is_finite() or amount <= 0 or amount != amount.quantize(
+        Decimal("0.01")
+    ):
+        raise RuntimeError(
+            f"{setting_name}: нужно конечное положительное число рублей "
+            f"без долей копейки, получено {raw!r}"
+        )
+    return amount.quantize(Decimal("0.01"))
+
+
+def load_activity_thresholds(
+    monthly_raw: str,
+    annual_raw: str,
+) -> tuple[Decimal, Decimal]:
+    monthly = parse_purchase_amount("MONTHLY_PURCHASE_AMOUNT", monthly_raw)
+    annual = parse_purchase_amount("ANNUAL_PURCHASE_AMOUNT", annual_raw)
+    if annual <= monthly:
+        raise RuntimeError(
+            "ANNUAL_PURCHASE_AMOUNT должен быть больше "
+            "MONTHLY_PURCHASE_AMOUNT: "
+            f"год {annual}, месяц {monthly}"
+        )
+    return monthly, annual
+
+
+def configured_activity_thresholds() -> tuple[Decimal, Decimal]:
+    return load_activity_thresholds(
+        os.getenv("MONTHLY_PURCHASE_AMOUNT", "3000.00"),
+        os.getenv("ANNUAL_PURCHASE_AMOUNT", "10000.00"),
+    )
+
+
+MONTHLY_PURCHASE_AMOUNT, ANNUAL_PURCHASE_AMOUNT = (
+    configured_activity_thresholds()
+)
 
 COMMISSION_RATES: dict[int, float] = {
     1: 20.0,

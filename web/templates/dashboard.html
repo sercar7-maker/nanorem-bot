@@ -47,6 +47,47 @@
                 </div>
             </div>
         </section>
+
+        <section
+            id="admin-partners"
+            class="auth-card dashboard-card"
+            hidden
+            aria-labelledby="admin-partners-title"
+        >
+            <div class="eyebrow">Администрирование</div>
+            <h2 id="admin-partners-title">Партнёры</h2>
+            <p id="admin-partners-status" class="form-message info" role="status" aria-live="polite" hidden></p>
+            <p id="admin-partners-denied" class="form-message error" role="alert" hidden>
+                Недостаточно прав для просмотра партнёров.
+            </p>
+            <div id="admin-partners-panel" hidden>
+                <div class="table-scroll">
+                    <table class="partners-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Ф.И.О.</th>
+                                <th>Email</th>
+                                <th>Телефон</th>
+                                <th>Роль</th>
+                                <th>Статус</th>
+                                <th>Root ID</th>
+                                <th>Upline ID</th>
+                                <th>Постоянный Root</th>
+                                <th>Активен</th>
+                            </tr>
+                        </thead>
+                        <tbody id="admin-partners-body"></tbody>
+                    </table>
+                </div>
+                <p id="admin-partners-empty" class="field-hint" hidden>Партнёров пока нет.</p>
+                <div class="pager">
+                    <button id="admin-partners-prev" class="button secondary" type="button">Назад</button>
+                    <span id="admin-partners-page" class="field-hint"></span>
+                    <button id="admin-partners-next" class="button secondary" type="button">Дальше</button>
+                </div>
+            </div>
+        </section>
     </main>
 </body>
 </html>

@@ -15,6 +15,7 @@ os.environ["TELEGRAM_WEBHOOK_SECRET"] = "pytest-only-secret"
 os.environ["ADMIN_API_SECRET"] = "pytest-only-secret"
 os.environ["WC_CONSUMER_KEY"] = "pytest-only-key"
 os.environ["WC_CONSUMER_SECRET"] = "pytest-only-secret"
+os.environ.pop("LOCAL_API_ONLY", None)
 
 
 def pytest_sessionstart(session):

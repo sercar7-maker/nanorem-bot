@@ -5,11 +5,27 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import event
 
+from config import configured_activity_thresholds, load_activity_thresholds
 from database.models import OrderStatus, Partner, PartnerStatus, Purchase
-from services import order_processor
+from services import order_processor, subscription_service
 from services.order_processor import OrderProcessor
 from services.partner_service import PartnerService
 from services.subscription_service import SubscriptionService
+
+
+@pytest.fixture(autouse=True)
+def pin_default_activity_thresholds(monkeypatch):
+    """Keep activity tests on the owner's defaults despite local env."""
+    monkeypatch.setattr(
+        subscription_service,
+        "MONTHLY_PURCHASE_AMOUNT",
+        Decimal("3000.00"),
+    )
+    monkeypatch.setattr(
+        subscription_service,
+        "ANNUAL_PURCHASE_AMOUNT",
+        Decimal("10000.00"),
+    )
 
 
 def _create_root_pair() -> tuple[int, int]:
@@ -624,3 +640,192 @@ def test_commission_failure_rolls_back_subscription_and_purchase(
         ext_ref="subscription-rollback"
     ).count() == 0
     session.close()
+
+
+def test_purchase_below_monthly_threshold_does_not_grant_activity(
+    isolated_database,
+):
+    session = isolated_database()
+    partner = Partner(first_name="Below monthly threshold")
+    session.add(partner)
+    session.flush()
+    purchase = _purchase(
+        session,
+        partner.id,
+        "2999.99",
+        datetime(2026, 10, 7, 12),
+        "below-monthly",
+    )
+
+    assert SubscriptionService(session).apply_purchase(purchase) is None
+    assert partner.subscription_end_date is None
+    assert partner.annual_activity_until is None
+    session.close()
+
+
+def test_purchase_above_monthly_threshold_grants_one_month(
+    isolated_database,
+):
+    session = isolated_database()
+    partner = Partner(first_name="Above monthly threshold")
+    session.add(partner)
+    session.flush()
+    purchase = _purchase(
+        session,
+        partner.id,
+        "3500.00",
+        datetime(2026, 10, 7, 12),
+        "above-monthly",
+    )
+
+    end = SubscriptionService(session).apply_purchase(purchase)
+
+    assert end == datetime(2026, 11, 7, 12)
+    assert partner.annual_activity_until is None
+    session.close()
+
+
+def test_several_purchases_in_one_month_reach_annual_threshold(
+    isolated_database,
+):
+    session = isolated_database()
+    partner = Partner(first_name="Several purchases reach annual")
+    session.add(partner)
+    session.flush()
+    service = SubscriptionService(session)
+    first = _purchase(
+        session,
+        partner.id,
+        "2000.00",
+        datetime(2026, 10, 7, 12),
+        "annual-parts-1",
+    )
+    assert service.apply_purchase(first) is None
+    second = _purchase(
+        session,
+        partner.id,
+        "3000.00",
+        datetime(2026, 10, 14, 12),
+        "annual-parts-2",
+    )
+    assert service.apply_purchase(second) == datetime(2026, 11, 14, 12)
+    third = _purchase(
+        session,
+        partner.id,
+        "5000.00",
+        datetime(2026, 10, 21, 12),
+        "annual-parts-3",
+    )
+    end = service.apply_purchase(third)
+
+    assert end == datetime(2027, 10, 21, 12)
+    assert partner.annual_activity_until == end
+    session.close()
+
+
+def test_purchases_above_monthly_do_not_sum_across_calendar_months(
+    isolated_database,
+):
+    session = isolated_database()
+    partner = Partner(first_name="No cross-month annual sum")
+    session.add(partner)
+    session.flush()
+    october = _purchase(
+        session,
+        partner.id,
+        "6000.00",
+        datetime(2026, 10, 7, 12),
+        "cross-october",
+    )
+    november = _purchase(
+        session,
+        partner.id,
+        "6000.00",
+        datetime(2026, 11, 8, 12),
+        "cross-november",
+    )
+    service = SubscriptionService(session)
+
+    assert service.apply_purchase(october) == datetime(2026, 11, 7, 12)
+    end = service.apply_purchase(november)
+
+    assert end == datetime(2026, 12, 8, 12)
+    assert partner.annual_activity_until is None
+    session.close()
+
+
+def test_alternative_thresholds_replace_owner_defaults(
+    isolated_database,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        subscription_service,
+        "MONTHLY_PURCHASE_AMOUNT",
+        Decimal("2000.00"),
+    )
+    monkeypatch.setattr(
+        subscription_service,
+        "ANNUAL_PURCHASE_AMOUNT",
+        Decimal("4500.00"),
+    )
+    session = isolated_database()
+    partner = Partner(first_name="Alternative thresholds")
+    session.add(partner)
+    session.flush()
+    service = SubscriptionService(session)
+    below = _purchase(
+        session,
+        partner.id,
+        "1999.99",
+        datetime(2026, 10, 7, 12),
+        "alt-below",
+    )
+    assert service.apply_purchase(below) is None
+    monthly = _purchase(
+        session,
+        partner.id,
+        "2000.00",
+        datetime(2026, 10, 8, 12),
+        "alt-monthly",
+    )
+    assert service.apply_purchase(monthly) == datetime(2026, 11, 8, 12)
+    annual = _purchase(
+        session,
+        partner.id,
+        "4500.00",
+        datetime(2026, 10, 9, 12),
+        "alt-annual",
+    )
+    end = service.apply_purchase(annual)
+
+    assert end == datetime(2027, 10, 9, 12)
+    assert partner.annual_activity_until == end
+    session.close()
+
+
+def test_activity_thresholds_use_defaults_when_unset(monkeypatch):
+    monkeypatch.delenv("MONTHLY_PURCHASE_AMOUNT", raising=False)
+    monkeypatch.delenv("ANNUAL_PURCHASE_AMOUNT", raising=False)
+
+    monthly, annual = configured_activity_thresholds()
+
+    assert monthly == Decimal("3000.00")
+    assert annual == Decimal("10000.00")
+
+
+@pytest.mark.parametrize(
+    ("monthly_raw", "annual_raw"),
+    [
+        ("0", "10000.00"),
+        ("-1.00", "10000.00"),
+        ("NaN", "10000.00"),
+        ("Infinity", "10000.00"),
+        ("3000.001", "10000.00"),
+        ("3000.00", "3000.00"),
+        ("10000.00", "3000.00"),
+        ("not-a-number", "10000.00"),
+    ],
+)
+def test_invalid_activity_thresholds_raise(monthly_raw, annual_raw):
+    with pytest.raises(RuntimeError):
+        load_activity_thresholds(monthly_raw, annual_raw)

@@ -252,6 +252,44 @@ h1 {
     max-width: 600px;
 }
 
+.dashboard-shell.admin-open {
+    max-width: 1100px;
+}
+
+.table-scroll {
+    overflow-x: auto;
+    margin-top: 16px;
+}
+
+.partners-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.partners-table th,
+.partners-table td {
+    padding: 10px 8px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    vertical-align: top;
+    white-space: nowrap;
+}
+
+.partners-table th {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.pager {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 16px;
+}
+
 .dashboard-header {
     display: flex;
     align-items: center;

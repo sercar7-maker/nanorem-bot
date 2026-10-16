@@ -11,10 +11,8 @@ from database.models import (
     PartnerStatus,
     Purchase,
 )
+from config import ANNUAL_PURCHASE_AMOUNT, MONTHLY_PURCHASE_AMOUNT
 from services.root_allocation_lock import acquire_root_allocation_lock
-
-MONTHLY_PURCHASE_AMOUNT = Decimal("3000.00")
-ANNUAL_PURCHASE_AMOUNT = Decimal("10000.00")
 
 
 def _as_utc_naive(value: datetime) -> datetime:
@@ -137,7 +135,7 @@ class SubscriptionService:
                 _as_utc_naive(threshold_date),
                 12,
             )
-        elif Decimal(str(purchase.amount)) == MONTHLY_PURCHASE_AMOUNT:
+        elif Decimal(str(purchase.amount)) >= MONTHLY_PURCHASE_AMOUNT:
             extension_from = max(
                 value
                 for value in (existing_end, purchased_at)
