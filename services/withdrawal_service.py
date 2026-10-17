@@ -112,4 +112,5 @@ class WithdrawalService:
         withdrawal = self.session.get(Withdrawal, withdrawal_id)
         if withdrawal is None:
             raise ValueError("Withdrawal not found")
+        self.session.refresh(withdrawal)
         return withdrawal
