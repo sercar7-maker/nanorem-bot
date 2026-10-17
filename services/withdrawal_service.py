@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
@@ -14,6 +15,16 @@ class WithdrawalService:
     def __init__(self, session: Session):
         self.session = session
         self.balance_service = BalanceService(session)
+
+    @contextmanager
+    def _operation(self):
+        connection = self.session.connection()
+        if connection.dialect.name == "sqlite":
+            driver = connection.connection.driver_connection
+            if not driver.in_transaction:
+                connection.exec_driver_sql("BEGIN")
+        with self.session.begin_nested():
+            yield
 
     @staticmethod
     def _money(amount: Decimal) -> Decimal:
@@ -37,7 +48,7 @@ class WithdrawalService:
         details: dict | None = None,
     ) -> Withdrawal:
         amount = self._money(amount)
-        with self.session.begin_nested():
+        with self._operation():
             withdrawal = Withdrawal(
                 partner_id=partner_id,
                 amount=amount,
@@ -56,7 +67,7 @@ class WithdrawalService:
         return withdrawal
 
     def complete(self, withdrawal_id: int) -> Withdrawal:
-        with self.session.begin_nested():
+        with self._operation():
             result = self.session.execute(
                 update(Withdrawal)
                 .where(
@@ -84,7 +95,7 @@ class WithdrawalService:
         withdrawal_id: int,
         admin_comment: str | None = None,
     ) -> Withdrawal:
-        with self.session.begin_nested():
+        with self._operation():
             result = self.session.execute(
                 update(Withdrawal)
                 .where(
