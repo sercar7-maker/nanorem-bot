@@ -1,5 +1,6 @@
 
 import ipaddress
+from decimal import Decimal
 import os
 from threading import Lock
 from typing import Literal
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from database.db import SessionLocal
 from database.models import Partner
+from database.models_balance import Balance
 from services.auth_service import (
     AUTH_SESSION_TTL,
     AuthCodeDelivery,
@@ -273,4 +275,23 @@ def get_current_partner(
             else partner.status
         ),
         "role": partner.role,
+    }
+
+
+@router.get("/me/balance")
+def get_current_balance(
+    response: Response,
+    partner: Partner = Depends(require_authenticated_partner),
+    session: Session = Depends(get_auth_db),
+):
+    """Read only the session partner's balance; never create financial rows."""
+    balance = session.get(Balance, partner.id)
+    available = balance.amount if balance is not None else Decimal("0.00")
+    reserved = balance.hold if balance is not None else Decimal("0.00")
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "available": format(available, ".2f"),
+        "reserved": format(reserved, ".2f"),
+        "total": format(available + reserved, ".2f"),
+        "currency": "RUB",
     }

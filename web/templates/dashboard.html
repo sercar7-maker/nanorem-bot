@@ -7,6 +7,7 @@
     <title>Кабинет — NANOREM</title>
     <link rel="stylesheet" href="/static/auth.css">
     <script src="/static/auth.js" defer></script>
+    <script src="/static/balance.js?v=1" defer></script>
 </head>
 <body class="auth-page">
     <main class="auth-shell dashboard-shell">
@@ -46,6 +47,18 @@
                     <strong id="partner-root-id"></strong>
                 </div>
             </div>
+        </section>
+
+        <section class="auth-card dashboard-card" aria-labelledby="balance-title">
+            <h2 id="balance-title">Баланс</h2>
+            <p id="balance-message" class="form-message info" role="status" aria-live="polite">Загружаем баланс…</p>
+            <div id="balance-details" class="details-list" hidden>
+                <div class="detail-row"><span>Доступно</span><strong id="balance-available"></strong></div>
+                <div class="detail-row"><span>В резерве</span><strong id="balance-reserved"></strong></div>
+                <div class="detail-row"><span>Всего</span><strong id="balance-total"></strong></div>
+            </div>
+            <p class="field-hint">Резерв включает средства, заблокированные под покупки и заявки на вывод.</p>
+            <button id="balance-refresh" class="button secondary" type="button">Обновить баланс</button>
         </section>
 
         <section
