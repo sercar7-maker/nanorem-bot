@@ -92,6 +92,12 @@ _UNIQUE_INDEXES = (
         ("order_id",),
         None,
     ),
+    (
+        "withdrawals",
+        "uq_withdrawals_partner_request_id",
+        ("partner_id", "request_id"),
+        "request_id IS NOT NULL",
+    ),
 )
 
 _MONEY_COLUMNS = {
@@ -574,6 +580,60 @@ def _upgrade_postgresql_money_types(connection, inspector) -> None:
             inspector.clear_cache()
 
 
+def _ensure_withdrawal_processor_permission(connection, inspector) -> None:
+    if not inspector.has_table("partners"):
+        return
+
+    present = {
+        column["name"] for column in inspector.get_columns("partners")
+    }
+    if "can_process_withdrawals" in present:
+        return
+
+    if connection.dialect.name not in {"sqlite", "postgresql"}:
+        raise RuntimeError(
+            "Withdrawal processing permission is supported only "
+            "on SQLite and PostgreSQL"
+        )
+
+    boolean_default = (
+        "0" if connection.dialect.name == "sqlite" else "FALSE"
+    )
+    connection.execute(
+        text(
+            "ALTER TABLE partners ADD COLUMN "
+            "can_process_withdrawals "
+            f"BOOLEAN NOT NULL DEFAULT {boolean_default}"
+        )
+    )
+    inspector.clear_cache()
+
+
+def _ensure_withdrawal_request_id(connection, inspector) -> None:
+    if not inspector.has_table("withdrawals"):
+        return
+
+    present = {
+        column["name"] for column in inspector.get_columns("withdrawals")
+    }
+    if "request_id" in present:
+        return
+
+    if connection.dialect.name not in {"sqlite", "postgresql"}:
+        raise RuntimeError(
+            "Withdrawal request_id migration is supported only "
+            "on SQLite and PostgreSQL"
+        )
+
+    connection.execute(
+        text(
+            "ALTER TABLE withdrawals "
+            "ADD COLUMN request_id VARCHAR(36)"
+        )
+    )
+    inspector.clear_cache()
+
+
 def upgrade_schema(engine: Engine) -> None:
     """Apply safe, additive upgrades for schemas created before these models."""
     with engine.begin() as connection:
@@ -598,6 +658,8 @@ def upgrade_schema(engine: Engine) -> None:
         _add_consent_columns(connection, inspector)
         _ensure_partner_activity_columns(connection, inspector)
         _ensure_partner_referral_codes(connection, inspector)
+        _ensure_withdrawal_processor_permission(connection, inspector)
+        _ensure_withdrawal_request_id(connection, inspector)
 
         for table, index_name, columns, predicate in _UNIQUE_INDEXES:
             _create_unique_index(

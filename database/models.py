@@ -7,7 +7,8 @@ import uuid
 
 from sqlalchemy import (
     CheckConstraint, Column, Index, Integer, String, Numeric, DateTime,
-    ForeignKey, Enum as SQLEnum, Text, Boolean, JSON, UniqueConstraint
+    ForeignKey, Enum as SQLEnum, Text, Boolean, JSON, UniqueConstraint,
+    false,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -139,6 +140,13 @@ class Partner(Base):
     lineage = Column(JSON, default=list)
 
     role = Column(String, default=PartnerRole.PARTNER.value)
+
+    can_process_withdrawals = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=false(),
+    )
 
     # 🔥 ДОБАВИЛИ РАНГ (если ещё нет)
     rank = Column(String, default="Silver")
@@ -493,6 +501,13 @@ class ConsentVersion(Base):
 
 class Withdrawal(Base):
     __tablename__ = "withdrawals"
+    __table_args__ = (
+        UniqueConstraint(
+            "partner_id",
+            "request_id",
+            name="uq_withdrawals_partner_request_id",
+        ),
+    )
 
     id = Column(Integer, primary_key=True)
 
@@ -504,6 +519,8 @@ class Withdrawal(Base):
     )
 
     amount = Column(Numeric(18, 2), nullable=False)
+
+    request_id = Column(String(36), nullable=True)
 
     method = Column(String, nullable=False)
 

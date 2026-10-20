@@ -114,6 +114,26 @@ def require_admin_partner(
     return partner
 
 
+def require_withdrawal_processor(
+    partner: Partner = Depends(require_authenticated_partner),
+    session: Session = Depends(get_auth_db),
+) -> Partner:
+    """Allow a partner only while the database grants withdrawal processing."""
+    current = session.get(Partner, partner.id)
+    if current is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+        )
+    session.refresh(current)
+    if not current.can_process_withdrawals:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Withdrawal processing is not allowed",
+        )
+    return current
+
+
 def get_auth_code_delivery() -> AuthCodeDelivery:
     if LOCAL_API_ONLY:
         return LocalAuthCodeDelivery()
@@ -275,6 +295,7 @@ def get_current_partner(
             else partner.status
         ),
         "role": partner.role,
+        "can_process_withdrawals": bool(partner.can_process_withdrawals),
     }
 
 

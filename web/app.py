@@ -29,6 +29,7 @@ from database.models import Partner
 from web.api_client import NanorvsAPIClient
 from web.admin_api import router as admin_router
 from web.auth_api import router as auth_router
+from web.withdrawal_api import router as withdrawal_router
 from core.commission import CommissionCalculator
 from core.security_tokens import create_telegram_binding_token
 from services.notifications import NotificationService
@@ -94,6 +95,7 @@ class _LocalApiOnlyBot:
 app = FastAPI()
 app.include_router(auth_router)
 app.include_router(admin_router)
+app.include_router(withdrawal_router)
 
 BASE_DIR = Path(__file__).resolve().parent
 

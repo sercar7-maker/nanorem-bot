@@ -16,7 +16,10 @@ from database.models_balance import Balance, BalanceTransaction
 
 from core.commission import CommissionCalculator
 from services.partner_service import PartnerService
-from services.withdrawal_service import WithdrawalService
+from services.withdrawal_service import (
+    WithdrawalRequestConflict,
+    WithdrawalService,
+)
 
 router = APIRouter()
 
@@ -222,6 +225,7 @@ def get_transactions(
 def withdraw(
     partner_id: int,
     amount: Decimal,
+    request_id: str,
     db: Session = Depends(get_db)
 ):
     try:
@@ -232,10 +236,18 @@ def withdraw(
             amount=amount,
             method="manual",
             details={"info": "web withdrawal"},
+            request_id=request_id,
         )
 
         db.commit()
         db.refresh(withdrawal)
+
+    except WithdrawalRequestConflict:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Withdrawal request conflicts with existing data",
+        )
 
     except ValueError as exc:
         db.rollback()
@@ -254,7 +266,8 @@ def withdraw(
     return {
         "status": withdrawal.status.value,
         "withdrawal_id": withdrawal.id,
-        "amount": amount
+        "amount": withdrawal.amount,
+        "request_id": withdrawal.request_id,
     }
 
 

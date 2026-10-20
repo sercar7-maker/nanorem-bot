@@ -509,10 +509,12 @@ def test_me_returns_only_authenticated_partner_fields(
         "root_id",
         "status",
         "role",
+        "can_process_withdrawals",
     }
     assert response.json()["id"] == partner_id
     assert response.json()["email"] == "me@example.test"
     assert response.json()["role"] == "partner"
+    assert response.json()["can_process_withdrawals"] is False
 
     stored = isolated_database()
     stored.get(Partner, partner_id).role = "admin"
